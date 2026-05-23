@@ -2,10 +2,10 @@
   "id": "pat-pat-party",
   "title": "Pat Pat Party",
   "description": "A lightweight token interaction module for sending cute pat-pat animations and chat messages.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "url": "https://github.com/lyguner-blip/pat-pat-party",
   "manifest": "https://raw.githubusercontent.com/lyguner-blip/pat-pat-party/main/module.json",
-  "download": "https://github.com/lyguner-blip/pat-pat-party/releases/download/v0.0.3/pat-pat-party-0.0.3.zip",
+  "download": "https://github.com/lyguner-blip/pat-pat-party/releases/download/v0.0.4/pat-pat-party-0.0.4.zip",
   "authors": [
     {
       "name": "Astral FVTT MOD Community"

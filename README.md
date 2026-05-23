@@ -2,7 +2,7 @@
 
 Pat Pat Party（摸摸头小队）是一个轻量、可爱、不打断跑团流程的 FoundryVTT Token 互动模组。玩家可以通过 Token HUD 对队友或允许的目标使用“摸摸头”，画布上会出现短动画，并可在聊天栏发送温暖的小文案。
 
-当前版本：`0.0.3 - 自定义亲密度`
+当前版本：`0.0.4 - PIXI 摸头动画优化`
 
 English summary: a tiny system-agnostic FoundryVTT module for cute token pat-pat animations and localized chat messages.
 
@@ -12,7 +12,7 @@ English summary: a tiny system-agnostic FoundryVTT module for cute token pat-pat
 - 点击“摸摸头”后选择三种力度：轻柔摸、普通摸、大力逆毛摸。
 - 在力度选择窗口中自定义一句摸头文案，默认是“亲密度上升↑”。
 - 自定义文案会同时显示为 Token 上方浮动文字和聊天卡片内容。
-- 直接使用 DOM overlay 播放小手从右上滑入、左右揉搓、上浮淡出的 Q 版动画。
+- 优先使用 PIXI/Canvas 临时容器播放小手从右上滑入、左右揉搓、上浮淡出的 Q 版动画。
 - 爱心、小花、星星粒子会分批冒出，并按三种力度改变数量和幅度。
 - 支持为每个 Token 持久化校准摸头位置，数据保存到 Token Document flag。
 - 使用 Foundry socket 广播动画，让同场景在线玩家也能看到。
@@ -34,12 +34,12 @@ https://raw.githubusercontent.com/lyguner-blip/pat-pat-party/main/module.json
 `module.json` 中的下载地址指向 GitHub Release ZIP：
 
 ```text
-https://github.com/lyguner-blip/pat-pat-party/releases/download/v0.0.3/pat-pat-party-0.0.3.zip
+https://github.com/lyguner-blip/pat-pat-party/releases/download/v0.0.4/pat-pat-party-0.0.4.zip
 ```
 
 ### 手动安装
 
-1. 从 GitHub Release 下载 `pat-pat-party-0.0.3.zip`。
+1. 从 GitHub Release 下载 `pat-pat-party-0.0.4.zip`。
 2. 解压后确认目录名为 `pat-pat-party`，且目录内直接包含 `module.json`。
 3. 将 `pat-pat-party` 文件夹放入 Foundry 的 `Data/modules/` 目录。
 4. 重启 FoundryVTT，进入世界后在“管理模组”中启用 `Pat Pat Party`。
@@ -77,9 +77,9 @@ https://github.com/lyguner-blip/pat-pat-party/releases/download/v0.0.3/pat-pat-p
 
 ## 已知限制
 
-- 动画是客户端 DOM overlay，不会创建真实测量模板、特效对象或 Active Effect。
-- 动画位置基于触发时的画布坐标换算，并叠加 Token 的 `patOffset` flag；如果动画播放过程中快速缩放或平移画布，动画不会持续追踪 Token。
-- Token 反馈会尽量轻微作用于当前客户端的 Token 视觉层；如果 Foundry 内部渲染对象不可用，会自动退回到 overlay 动画。
+- 动画是客户端 PIXI/Canvas 临时容器，不会创建真实测量模板、特效对象或 Active Effect；极端情况下会退回 DOM overlay。
+- 动画位置基于 Token 头顶 world 坐标，并叠加 Token 的 `patOffset` flag；播放中会尽量跟随 Token 与画布缩放。
+- Token 反馈会尽量轻微作用于当前客户端的 Token 视觉层；如果 Foundry 内部渲染对象不可用，会自动只播放特效层。
 - 自定义文案会被压缩空白并限制在 40 个字符内，聊天和浮动文字都会进行 HTML 转义。
 - 冷却保存在客户端内存中，刷新页面或重新进入世界后会重置。
 - Socket 同步只负责动画广播，聊天消息由触发者创建一次。

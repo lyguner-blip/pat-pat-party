@@ -7,6 +7,7 @@ const HUD_CALIBRATE_BUTTON_CLASS = "pat-pat-party-calibrate-hud-button";
 const OVERLAY_ID = "pat-pat-party-overlay";
 const PAT_OFFSET_FLAG = "patOffset";
 const MAX_MESSAGE_LENGTH = 40;
+const HAND_SYMBOL = "\u{1F590}\uFE0F";
 
 const INTENSITIES = ["gentle", "normal", "rough"];
 const LEGACY_INTENSITY_MAP = {
@@ -31,7 +32,7 @@ const EFFECT_DURATION_BY_INTENSITY = {
 const PARTICLE_CONFIG_BY_INTENSITY = {
   gentle: {
     count: [3, 5],
-    symbols: ["&#x1F497;", "&#x1F33C;", "&#x2728;"],
+    symbols: ["\u{1F497}", "\u{1F33C}", "\u2728"],
     drift: 32,
     rise: [42, 74],
     delay: [130, 620],
@@ -39,7 +40,7 @@ const PARTICLE_CONFIG_BY_INTENSITY = {
   },
   normal: {
     count: [5, 8],
-    symbols: ["&#x1F495;", "&#x1F497;", "&#x1F33C;", "&#x2728;"],
+    symbols: ["\u{1F495}", "\u{1F497}", "\u{1F33C}", "\u2728"],
     drift: 46,
     rise: [48, 88],
     delay: [70, 560],
@@ -47,7 +48,7 @@ const PARTICLE_CONFIG_BY_INTENSITY = {
   },
   rough: {
     count: [8, 12],
-    symbols: ["&#x1F495;", "&#x1F497;", "&#x1F33C;", "&#x2728;", "&#x1F4AB;"],
+    symbols: ["\u{1F495}", "\u{1F497}", "\u{1F33C}", "\u2728", "\u{1F4AB}"],
     drift: 64,
     rise: [54, 104],
     delay: [20, 620],
@@ -65,6 +66,48 @@ const TOKEN_FEEDBACK_BY_INTENSITY = {
   gentle: { cycles: 2, scaleX: 0.018, scaleY: 0.032, shiftX: 0.4, shiftY: 2.2, rotation: 0 },
   normal: { cycles: 3, scaleX: 0.028, scaleY: 0.045, shiftX: 1.8, shiftY: 3.4, rotation: 0.01 },
   rough: { cycles: 5, scaleX: 0.04, scaleY: 0.058, shiftX: 3.2, shiftY: 4.6, rotation: 0.018 }
+};
+
+const PIXI_EFFECT_CONFIG_BY_INTENSITY = {
+  gentle: {
+    handSize: 34,
+    handScale: [0.82, 1],
+    enterX: 54,
+    enterY: -64,
+    rubAmplitude: 10,
+    rubCount: 2,
+    rubRotation: 0.1,
+    pressY: 4,
+    exitY: -42,
+    particleDuration: 1080,
+    textRise: 44
+  },
+  normal: {
+    handSize: 39,
+    handScale: [0.86, 1.08],
+    enterX: 64,
+    enterY: -70,
+    rubAmplitude: 22,
+    rubCount: 3,
+    rubRotation: 0.18,
+    pressY: 6,
+    exitY: -48,
+    particleDuration: 980,
+    textRise: 52
+  },
+  rough: {
+    handSize: 45,
+    handScale: [0.92, 1.2],
+    enterX: 76,
+    enterY: -76,
+    rubAmplitude: 34,
+    rubCount: 5,
+    rubRotation: 0.32,
+    pressY: 9,
+    exitY: -56,
+    particleDuration: 900,
+    textRise: 60
+  }
 };
 
 const cooldowns = new Map();
@@ -427,6 +470,79 @@ function checkCooldown(token) {
 function playPatAnimation(token, intensity = getSetting("animationIntensity"), message = getDefaultPatMessage(), offsetOverride = null) {
   if (!token || !canvas?.ready) return;
 
+  const selectedIntensity = normalizeIntensity(intensity);
+  const safeMessage = normalizePatMessage(message);
+
+  if (playPixiPatAnimation(token, selectedIntensity, safeMessage, offsetOverride)) {
+    return;
+  }
+
+  playDomPatAnimation(token, selectedIntensity, safeMessage, offsetOverride);
+}
+
+function playPixiPatAnimation(token, intensity, message, offsetOverride = null) {
+  const PIXIConstructor = globalThis.PIXI;
+  const parent = getPixiEffectParent();
+  const ticker = canvas?.app?.ticker;
+
+  if (!PIXIConstructor || !parent?.addChild || !ticker) return false;
+
+  const position = getTokenTopCenterWorldPosition(token, offsetOverride);
+  if (!position) {
+    warn("Unable to determine token world position for PIXI animation.", token);
+    return false;
+  }
+
+  let cleanupEffect = null;
+
+  try {
+    const selectedIntensity = normalizeIntensity(intensity);
+    const duration = EFFECT_DURATION_BY_INTENSITY[selectedIntensity];
+    const config = PIXI_EFFECT_CONFIG_BY_INTENSITY[selectedIntensity] ?? PIXI_EFFECT_CONFIG_BY_INTENSITY.normal;
+    const effect = createPixiPatEffect(PIXIConstructor, selectedIntensity, message);
+    const tokenFeedback = createTokenFeedbackAnimator(token, selectedIntensity);
+    const startedAt = performance.now();
+    let cleaned = false;
+
+    effect.position.set(position.x, position.y);
+    effect.scale.set(getInverseCanvasScale());
+    parent.addChild(effect);
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      ticker.remove(tick, effect);
+      tokenFeedback?.cleanup();
+      if (effect.parent) effect.parent.removeChild(effect);
+      if (!effect.destroyed) effect.destroy({ children: true });
+    };
+    cleanupEffect = cleanup;
+
+    const tick = () => {
+      const elapsed = performance.now() - startedAt;
+      const progress = Math.min(1, elapsed / duration);
+      const nextPosition = getTokenTopCenterWorldPosition(token, offsetOverride);
+      if (nextPosition) effect.position.set(nextPosition.x, nextPosition.y);
+      effect.scale.set(getInverseCanvasScale());
+
+      updatePixiPatEffect(effect, selectedIntensity, config, elapsed, progress, duration);
+      tokenFeedback?.update(progress);
+
+      if (progress >= 1) cleanup();
+    };
+
+    ticker.add(tick, effect, PIXIConstructor.UPDATE_PRIORITY?.LOW ?? 0);
+    tick();
+    window.setTimeout(cleanup, duration + 900);
+    return true;
+  } catch (error) {
+    cleanupEffect?.();
+    warn("PIXI pat animation failed; using DOM fallback.", error);
+    return false;
+  }
+}
+
+function playDomPatAnimation(token, intensity, message, offsetOverride = null) {
   const position = getTokenScreenPosition(token, offsetOverride);
   if (!position) {
     warn("Unable to determine token screen position for animation.", token);
@@ -743,6 +859,21 @@ function getTokenScreenPosition(token, offsetOverride = null) {
   };
 }
 
+function getTokenTopCenterWorldPosition(token, offsetOverride = null) {
+  const center = getTokenCenter(token);
+  if (!center) return null;
+
+  const tokenHeight = Number(token?.h ?? token?.height ?? token?.bounds?.height ?? 0);
+  const topY = Number.isFinite(token?.y) ? token.y : center.y - tokenHeight / 2;
+  const offset = offsetOverride ? normalizeOffset(offsetOverride) : getPatOffset(token);
+  const scale = getCanvasStageScale();
+
+  return {
+    x: center.x + offset.x / scale,
+    y: topY + offset.y / scale
+  };
+}
+
 function getTokenTopCenterScreenPosition(token) {
   const center = getTokenCenter(token);
   if (!center) return null;
@@ -775,6 +906,33 @@ function getTokenTopCenterScreenPosition(token) {
   }
 
   return null;
+}
+
+function getPixiEffectParent() {
+  const parent = canvas?.interface ?? canvas?.stage;
+  if (!parent?.addChild) return null;
+
+  try {
+    parent.sortableChildren = true;
+  } catch (error) {
+    debug("Unable to enable sortable PIXI children for effect parent.", error);
+  }
+
+  return parent;
+}
+
+function getCanvasStageScale() {
+  const scale =
+    Number(canvas?.stage?.scale?.x) ||
+    Number(canvas?.stage?.worldTransform?.a) ||
+    Number(canvas?.stage?.worldTransform?.d) ||
+    1;
+
+  return Math.max(0.05, Math.abs(scale));
+}
+
+function getInverseCanvasScale() {
+  return 1 / getCanvasStageScale();
 }
 
 function getTokenCenter(token) {
@@ -860,9 +1018,328 @@ function createRubArcMarkup(intensity) {
   }).join("");
 }
 
+function createPixiPatEffect(PIXIConstructor, intensity, message) {
+  const selectedIntensity = normalizeIntensity(intensity);
+  const config = PIXI_EFFECT_CONFIG_BY_INTENSITY[selectedIntensity] ?? PIXI_EFFECT_CONFIG_BY_INTENSITY.normal;
+  const effect = new PIXIConstructor.Container();
+  effect.name = `${MODULE_ID}-pixi-effect`;
+  effect.eventMode = "none";
+  effect.interactiveChildren = false;
+  effect.sortableChildren = true;
+  effect.zIndex = Number(CONFIG?.Canvas?.groups?.interface?.zIndexScrollingText ?? 700) + 20;
+
+  const tokenGlow = createPixiTokenGlow(PIXIConstructor);
+  const arcs = createPixiRubArcs(PIXIConstructor, selectedIntensity);
+  const handGroup = createPixiHand(PIXIConstructor, config);
+  const particles = createPixiParticles(PIXIConstructor, selectedIntensity);
+  const floatingText = createPixiFloatingText(PIXIConstructor, message);
+
+  tokenGlow.zIndex = 1;
+  arcs.forEach((arc) => arc.zIndex = 2);
+  particles.forEach((particle) => particle.text.zIndex = 3);
+  handGroup.zIndex = 4;
+  floatingText.group.zIndex = 5;
+
+  effect.addChild(tokenGlow);
+  for (const arc of arcs) effect.addChild(arc);
+  for (const particle of particles) effect.addChild(particle.text);
+  effect.addChild(handGroup);
+  effect.addChild(floatingText.group);
+
+  effect.patPatParty = {
+    tokenGlow,
+    arcs,
+    handGroup,
+    particles,
+    floatingText
+  };
+
+  return effect;
+}
+
+function createPixiTokenGlow(PIXIConstructor) {
+  const glow = new PIXIConstructor.Graphics();
+  glow.name = `${MODULE_ID}-token-feedback`;
+  glow.beginFill(0xff9cca, 0.34);
+  glow.drawEllipse(0, 22, 48, 14);
+  glow.endFill();
+  glow.beginFill(0x8ff5df, 0.18);
+  glow.drawEllipse(0, 22, 64, 18);
+  glow.endFill();
+  glow.alpha = 0;
+  return glow;
+}
+
+function createPixiHand(PIXIConstructor, config) {
+  const group = new PIXIConstructor.Container();
+  group.name = `${MODULE_ID}-hand`;
+  group.position.set(config.enterX, config.enterY);
+  group.alpha = 0;
+
+  const glow = new PIXIConstructor.Graphics();
+  glow.beginFill(0xff87bf, 0.26);
+  glow.drawCircle(0, 3, config.handSize * 0.98);
+  glow.endFill();
+  glow.beginFill(0x9cf3df, 0.16);
+  glow.drawCircle(0, 4, config.handSize * 1.18);
+  glow.endFill();
+
+  const hand = createPixiText(PIXIConstructor, HAND_SYMBOL, {
+    fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+    fontSize: config.handSize,
+    lineJoin: "round",
+    dropShadow: true,
+    dropShadowAlpha: 0.26,
+    dropShadowBlur: 4,
+    dropShadowDistance: 2
+  });
+  setPixiAnchor(hand, 0.5);
+
+  group.addChild(glow);
+  group.addChild(hand);
+  group.patPatParty = { glow, hand };
+  return group;
+}
+
+function createPixiParticles(PIXIConstructor, intensity) {
+  const selectedIntensity = normalizeIntensity(intensity);
+  const config = PARTICLE_CONFIG_BY_INTENSITY[selectedIntensity] ?? PARTICLE_CONFIG_BY_INTENSITY.normal;
+  const particleCount = randomInt(config.count[0], config.count[1]);
+
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const startX = randomBetween(-22, 22);
+    const driftX = side * randomBetween(config.drift * 0.35, config.drift);
+    const startY = randomBetween(-8, 16);
+    const rise = randomBetween(config.rise[0], config.rise[1]);
+    const delay = randomInt(config.delay[0], config.delay[1]);
+    const size = randomInt(config.size[0], config.size[1]);
+    const targetScale = randomBetween(0.86, 1.24);
+    const rotation = randomBetween(-0.38, 0.38);
+    const text = createPixiText(PIXIConstructor, pick(config.symbols), {
+      fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+      fontSize: size,
+      dropShadow: true,
+      dropShadowAlpha: 0.24,
+      dropShadowBlur: 3,
+      dropShadowDistance: 1
+    });
+    setPixiAnchor(text, 0.5);
+    text.alpha = 0;
+    text.position.set(startX, startY);
+
+    return {
+      text,
+      delay,
+      duration: PIXI_EFFECT_CONFIG_BY_INTENSITY[selectedIntensity].particleDuration,
+      startX,
+      startY,
+      driftX,
+      rise,
+      targetScale,
+      rotation
+    };
+  });
+}
+
+function createPixiRubArcs(PIXIConstructor, intensity) {
+  const selectedIntensity = normalizeIntensity(intensity);
+  const arcCount = RUB_ARCS_BY_INTENSITY[selectedIntensity] ?? 0;
+  return Array.from({ length: arcCount }, (_, index) => {
+    const arc = new PIXIConstructor.Graphics();
+    const color = index % 2 === 0 ? 0xffdf75 : 0xff9cca;
+    arc.lineStyle({ width: 2.6, color, alpha: 0.9, cap: PIXIConstructor.LINE_CAP?.ROUND });
+    arc.moveTo(-18, 0);
+    arc.quadraticCurveTo(0, -15, 18, 0);
+    arc.alpha = 0;
+    arc.pivot.set(0, 0);
+    arc.position.set((index - (arcCount - 1) / 2) * 18, -8 - index * 2);
+    arc.rotation = index % 2 === 0 ? -0.2 : 0.2;
+    arc.patPatParty = {
+      delay: selectedIntensity === "rough" ? 150 + index * 120 : 240,
+      duration: selectedIntensity === "rough" ? 560 : 620,
+      startY: arc.position.y
+    };
+    return arc;
+  });
+}
+
+function createPixiFloatingText(PIXIConstructor, message) {
+  const group = new PIXIConstructor.Container();
+  group.name = `${MODULE_ID}-floating-text`;
+  group.position.set(0, -76);
+  group.alpha = 0;
+
+  const label = createPixiText(PIXIConstructor, normalizePatMessage(message), {
+    fontFamily: "Arial, \"Microsoft YaHei\", sans-serif",
+    fontSize: 15,
+    fontWeight: "700",
+    fill: 0xb72f71,
+    align: "center",
+    wordWrap: true,
+    wordWrapWidth: 210,
+    breakWords: true,
+    dropShadow: true,
+    dropShadowAlpha: 0.16,
+    dropShadowBlur: 4,
+    dropShadowDistance: 1
+  });
+  setPixiAnchor(label, 0.5);
+
+  const width = Math.max(78, Math.min(228, label.width + 22));
+  const height = Math.max(28, label.height + 10);
+  const bubble = new PIXIConstructor.Graphics();
+  bubble.lineStyle({ width: 1, color: 0xffacd0, alpha: 0.6 });
+  bubble.beginFill(0xfff7fc, 0.92);
+  bubble.drawRoundedRect(-width / 2, -height / 2, width, height, 13);
+  bubble.endFill();
+
+  group.addChild(bubble);
+  group.addChild(label);
+  return { group, bubble, label };
+}
+
+function updatePixiPatEffect(effect, intensity, config, elapsed, progress, duration) {
+  const parts = effect.patPatParty;
+  if (!parts) return;
+
+  updatePixiHand(parts.handGroup, config, progress);
+  updatePixiTokenGlow(parts.tokenGlow, intensity, progress);
+  updatePixiParticles(parts.particles, elapsed);
+  updatePixiRubArcs(parts.arcs, elapsed);
+  updatePixiFloatingText(parts.floatingText.group, config, elapsed, progress, duration);
+}
+
+function updatePixiHand(handGroup, config, progress) {
+  const enterEnd = 0.22;
+  const rubEnd = 0.82;
+  const exitStart = rubEnd;
+  const handParts = handGroup.patPatParty;
+
+  if (progress < enterEnd) {
+    const t = easeOutBack(progress / enterEnd);
+    handGroup.alpha = clamp01(t);
+    handGroup.x = lerp(config.enterX, 0, t);
+    handGroup.y = lerp(config.enterY, -8, easeOutCubic(progress / enterEnd));
+    handGroup.rotation = lerp(0.42, 0.03, t);
+    handGroup.scale.set(lerp(config.handScale[0], config.handScale[1], easeOutBack(progress / enterEnd)));
+  } else if (progress < rubEnd) {
+    const t = (progress - enterEnd) / (rubEnd - enterEnd);
+    const wave = Math.sin(t * config.rubCount * Math.PI * 2);
+    const press = Math.abs(wave);
+    handGroup.alpha = 1;
+    handGroup.x = wave * config.rubAmplitude;
+    handGroup.y = -8 + press * config.pressY;
+    handGroup.rotation = wave * config.rubRotation;
+    handGroup.scale.set(config.handScale[1] * (1 + press * 0.04));
+  } else {
+    const t = easeInOutCubic((progress - exitStart) / (1 - exitStart));
+    handGroup.alpha = 1 - t;
+    handGroup.x = lerp(0, -6, t);
+    handGroup.y = lerp(-8, config.exitY, t);
+    handGroup.rotation = lerp(0.02, -0.12, t);
+    handGroup.scale.set(lerp(config.handScale[1], config.handScale[0], t));
+  }
+
+  if (handParts?.glow) {
+    const pulse = Math.sin(progress * Math.PI * config.rubCount * 2);
+    handParts.glow.alpha = handGroup.alpha * (0.48 + Math.abs(pulse) * 0.18);
+    handParts.glow.scale.set(0.9 + Math.abs(pulse) * 0.1);
+  }
+}
+
+function updatePixiTokenGlow(glow, intensity, progress) {
+  const selectedIntensity = normalizeIntensity(intensity);
+  const config = TOKEN_FEEDBACK_BY_INTENSITY[selectedIntensity] ?? TOKEN_FEEDBACK_BY_INTENSITY.normal;
+  const envelope = Math.sin(progress * Math.PI);
+  const wave = Math.sin(progress * Math.PI * config.cycles);
+  const press = Math.abs(wave) * envelope;
+
+  glow.alpha = 0.62 * press;
+  glow.x = config.shiftX * wave * 1.2;
+  glow.y = 22 + config.shiftY * press * 0.8;
+  glow.scale.set(1 + config.scaleX * press * 8, 1 - config.scaleY * press * 4);
+}
+
+function updatePixiParticles(particles, elapsed) {
+  for (const particle of particles) {
+    const t = (elapsed - particle.delay) / particle.duration;
+    if (t <= 0) {
+      particle.text.alpha = 0;
+      continue;
+    }
+
+    const progress = Math.min(1, t);
+    const drift = easeOutCubic(progress);
+    const fadeOut = 1 - easeInCubic(Math.max(0, (progress - 0.62) / 0.38));
+    const fadeIn = easeOutCubic(Math.min(1, progress / 0.2));
+    particle.text.alpha = Math.max(0, Math.min(fadeIn, fadeOut));
+    particle.text.x = particle.startX + particle.driftX * drift;
+    particle.text.y = particle.startY - particle.rise * drift;
+    particle.text.rotation = particle.rotation * drift;
+    particle.text.scale.set(lerp(0.45, particle.targetScale, easeOutBack(Math.min(1, progress * 1.25))));
+  }
+}
+
+function updatePixiRubArcs(arcs, elapsed) {
+  for (const arc of arcs) {
+    const data = arc.patPatParty;
+    const t = (elapsed - data.delay) / data.duration;
+    if (t <= 0) {
+      arc.alpha = 0;
+      continue;
+    }
+
+    const progress = Math.min(1, t);
+    const fade = Math.sin(progress * Math.PI);
+    arc.alpha = Math.max(0, fade) * 0.82;
+    arc.y = data.startY - 18 * easeOutCubic(progress);
+    arc.scale.set(lerp(0.72, 1.2, easeOutCubic(progress)));
+  }
+}
+
+function updatePixiFloatingText(textGroup, config, elapsed, progress, duration) {
+  const t = Math.min(1, Math.max(0, (elapsed - 80) / Math.max(1, duration - 120)));
+  const fadeIn = easeOutCubic(Math.min(1, t / 0.22));
+  const fadeOut = 1 - easeInCubic(Math.max(0, (progress - 0.72) / 0.28));
+  textGroup.alpha = Math.max(0, Math.min(fadeIn, fadeOut));
+  textGroup.y = -76 - config.textRise * easeOutCubic(t);
+  textGroup.scale.set(lerp(0.92, 1, easeOutBack(Math.min(1, t * 1.4))));
+}
+
 function playTokenSpriteFeedback(token, intensity, duration) {
+  const feedback = createTokenFeedbackAnimator(token, intensity);
+  if (!feedback) return;
+
+  let frameId = null;
+  let active = true;
+  const startedAt = performance.now();
+
+  const cleanup = () => {
+    if (!active) return;
+    active = false;
+    if (frameId) window.cancelAnimationFrame(frameId);
+    feedback.cleanup();
+  };
+
+  const animate = (now) => {
+    if (!active) return;
+    const progress = Math.min(1, (now - startedAt) / duration);
+    feedback.update(progress);
+    if (progress < 1) {
+      frameId = window.requestAnimationFrame(animate);
+    } else {
+      cleanup();
+    }
+  };
+
+  frameId = window.requestAnimationFrame(animate);
+  window.setTimeout(cleanup, duration + 250);
+}
+
+function createTokenFeedbackAnimator(token, intensity) {
   const mesh = getTokenVisualMesh(token);
-  if (!mesh?.scale || !mesh?.position || mesh.destroyed) return;
+  if (!mesh?.scale || !mesh?.position || mesh.destroyed) return null;
 
   const previousCleanup = tokenFeedbackCleanups.get(token);
   if (previousCleanup) previousCleanup();
@@ -877,9 +1354,7 @@ function playTokenSpriteFeedback(token, intensity, duration) {
     rotation: Number(mesh.rotation) || 0
   };
 
-  let frameId = null;
   let active = true;
-  const startedAt = performance.now();
 
   const restore = () => {
     if (mesh.destroyed) return;
@@ -893,20 +1368,18 @@ function playTokenSpriteFeedback(token, intensity, duration) {
   const cleanup = () => {
     if (!active) return;
     active = false;
-    if (frameId) window.cancelAnimationFrame(frameId);
     restore();
     tokenFeedbackCleanups.delete(token);
   };
 
   tokenFeedbackCleanups.set(token, cleanup);
 
-  const animate = (now) => {
+  const update = (progress) => {
     if (!active || mesh.destroyed) {
       cleanup();
       return;
     }
 
-    const progress = Math.min(1, (now - startedAt) / duration);
     const envelope = Math.sin(progress * Math.PI);
     const wave = Math.sin(progress * Math.PI * config.cycles);
     const press = Math.abs(wave) * envelope;
@@ -916,20 +1389,30 @@ function playTokenSpriteFeedback(token, intensity, duration) {
     mesh.position.x = original.x + config.shiftX * wave * envelope;
     mesh.position.y = original.y + config.shiftY * press;
     mesh.rotation = original.rotation + config.rotation * wave * envelope;
-
-    if (progress < 1) {
-      frameId = window.requestAnimationFrame(animate);
-    } else {
-      cleanup();
-    }
   };
 
-  frameId = window.requestAnimationFrame(animate);
-  window.setTimeout(cleanup, duration + 250);
+  return { update, cleanup };
 }
 
 function getTokenVisualMesh(token) {
   return token?.mesh ?? token?.sprite ?? token?.icon ?? null;
+}
+
+function createPixiText(PIXIConstructor, text, style = {}) {
+  try {
+    return new PIXIConstructor.Text(text, style);
+  } catch (error) {
+    debug("Using PIXI.Text object-constructor fallback.", error);
+    return new PIXIConstructor.Text({ text, style });
+  }
+}
+
+function setPixiAnchor(displayObject, value) {
+  try {
+    displayObject.anchor?.set?.(value);
+  } catch (error) {
+    debug("Unable to set PIXI text anchor.", error);
+  }
 }
 
 function getDefaultPatMessage() {
@@ -960,6 +1443,38 @@ function randomBetween(min, max) {
 function pick(values) {
   if (!Array.isArray(values) || values.length === 0) return "";
   return values[Math.floor(Math.random() * values.length)];
+}
+
+function lerp(from, to, progress) {
+  return from + (to - from) * clamp01(progress);
+}
+
+function clamp01(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(1, Math.max(0, number));
+}
+
+function easeOutCubic(value) {
+  const t = clamp01(value);
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function easeInCubic(value) {
+  const t = clamp01(value);
+  return t * t * t;
+}
+
+function easeInOutCubic(value) {
+  const t = clamp01(value);
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function easeOutBack(value) {
+  const t = clamp01(value);
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 }
 
 function ensureOverlay() {
