@@ -2,6 +2,7 @@
   "PATPAT": {
     "Controls": {
       "Pat": "摸摸头",
+      "Hug": "抱抱",
       "Calibrate": "校准摸头位置"
     },
     "Intensity": {
@@ -49,6 +50,15 @@
         "MessagePlaceholder": "亲密度上升↑",
         "MessageHint": "会显示在 Token 上方和聊天卡片中。最多 {max} 个字符；留空则使用默认文案。"
       },
+      "Hug": {
+        "Title": "给队友一个抱抱",
+        "Source": "发起 Token",
+        "Target": "目标 Token",
+        "MessageLabel": "显示文案",
+        "MessagePlaceholder": "抱抱充电中♡",
+        "MessageHint": "会显示在两个 Token 中间和聊天卡片中。最多 {max} 个字符；留空则使用默认文案。",
+        "Action": "抱抱"
+      },
       "Calibration": {
         "Title": "校准摸头位置",
         "Token": "当前 Token",
@@ -66,6 +76,8 @@
       "NoPermission": "你没有权限摸这个 Token。",
       "HostileNotAllowed": "当前设置不允许摸敌对 Token。",
       "NoToken": "没有找到有效的目标 Token。",
+      "NoHugSource": "请先选中一个自己拥有的 Token，再对另一个 Token 使用抱抱。",
+      "NoHugSourcePermission": "你只能用自己拥有的 Token 发起抱抱。",
       "NoCalibrationPermission": "你现在不能保存这个 Token 的摸头位置。",
       "Generic": "摸摸头小队未能完成这次互动。"
     },
@@ -74,6 +86,14 @@
       "Flavor": "一次小小的 Token 互动",
       "Message": "亲密度上升↑",
       "UnknownTarget": "这个 Token"
+    },
+    "Hug": {
+      "Chat": {
+        "Title": "抱抱小队",
+        "Flavor": "一次温暖的 Token 互动",
+        "Message": "抱抱充电中♡",
+        "Line": "{actor} 给了 {target} 一个抱抱。"
+      }
     }
   }
 }

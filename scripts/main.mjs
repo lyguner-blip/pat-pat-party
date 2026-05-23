@@ -3,11 +3,14 @@ const MODULE_TITLE = "Pat Pat Party";
 const SOCKET_NAME = `module.${MODULE_ID}`;
 const LOG_PREFIX = "[Pat Pat Party]";
 const HUD_PAT_BUTTON_CLASS = "pat-pat-party-hud-button";
+const HUD_HUG_BUTTON_CLASS = "pat-pat-party-hug-hud-button";
 const HUD_CALIBRATE_BUTTON_CLASS = "pat-pat-party-calibrate-hud-button";
 const OVERLAY_ID = "pat-pat-party-overlay";
 const PAT_OFFSET_FLAG = "patOffset";
 const MAX_MESSAGE_LENGTH = 40;
 const HAND_SYMBOL = "\u{1F590}\uFE0F";
+const HUG_SYMBOL = "\u{1F917}";
+const HUG_HEART_SYMBOL = "\u{1F49E}";
 
 const INTENSITIES = ["gentle", "normal", "rough"];
 const LEGACY_INTENSITY_MAP = {
@@ -110,6 +113,16 @@ const PIXI_EFFECT_CONFIG_BY_INTENSITY = {
   }
 };
 
+const HUG_EFFECT_DURATION = 1450;
+const HUG_PARTICLE_CONFIG = {
+  count: [8, 12],
+  symbols: ["\u{1F497}", "\u{1F495}", "\u{1F33C}", "\u2728", "\u{1F49E}"],
+  drift: 76,
+  rise: [48, 104],
+  delay: [80, 720],
+  size: [15, 26]
+};
+
 const cooldowns = new Map();
 const tokenFeedbackCleanups = new WeakMap();
 
@@ -124,9 +137,12 @@ Hooks.once("ready", () => {
 
   game.patPatParty = {
     handlePatToken,
+    handleHugToken,
     openPatIntensityDialog,
+    openHugDialog,
     openCalibrationDialog,
     playPatAnimation,
+    playHugAnimation,
     canPatToken,
     getPatOffset,
     savePatOffset,
@@ -220,6 +236,17 @@ function injectTokenHudButton(app, html, data) {
     });
 
     targetColumn.appendChild(patButton);
+  }
+
+  if (!root.querySelector(`.${HUD_HUG_BUTTON_CLASS}`)) {
+    const hugButton = createHudButton({
+      className: HUD_HUG_BUTTON_CLASS,
+      iconClass: "fa-solid fa-heart",
+      labelKey: "PATPAT.Controls.Hug",
+      action: () => openHugDialog(resolveLiveToken(token) ?? token)
+    });
+
+    targetColumn.appendChild(hugButton);
   }
 
   if (!root.querySelector(`.${HUD_CALIBRATE_BUTTON_CLASS}`)) {
@@ -324,6 +351,71 @@ function runPatFromDialog(token, intensity, message) {
   });
 }
 
+function openHugDialog(targetToken) {
+  const liveTarget = resolveLiveToken(targetToken) ?? targetToken;
+  if (!liveTarget) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const sourceToken = getHugSourceToken(liveTarget);
+  if (!sourceToken) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoHugSource"));
+    return;
+  }
+
+  const defaultMessage = getDefaultHugMessage();
+  const content = `
+    <form class="pat-pat-party-dialog pat-pat-party-hug-form">
+      <p class="pat-pat-party-dialog-target">
+        <strong>${escapeHtml(localize("PATPAT.Dialogs.Hug.Source"))}</strong>
+        <span>${escapeHtml(getTokenName(sourceToken))}</span>
+      </p>
+      <p class="pat-pat-party-dialog-target">
+        <strong>${escapeHtml(localize("PATPAT.Dialogs.Hug.Target"))}</strong>
+        <span>${escapeHtml(getTokenName(liveTarget))}</span>
+      </p>
+      <div class="form-group">
+        <label for="pat-pat-party-hug-message">${escapeHtml(localize("PATPAT.Dialogs.Hug.MessageLabel"))}</label>
+        <input
+          id="pat-pat-party-hug-message"
+          type="text"
+          name="message"
+          maxlength="${MAX_MESSAGE_LENGTH}"
+          value="${escapeHtml(defaultMessage)}"
+          placeholder="${escapeHtml(localize("PATPAT.Dialogs.Hug.MessagePlaceholder"))}">
+      </div>
+      <p class="notes">${escapeHtml(format("PATPAT.Dialogs.Hug.MessageHint", { max: MAX_MESSAGE_LENGTH }))}</p>
+    </form>
+  `;
+
+  new Dialog({
+    title: localize("PATPAT.Dialogs.Hug.Title"),
+    content,
+    buttons: {
+      hug: {
+        icon: '<i class="fa-solid fa-heart"></i>',
+        label: localize("PATPAT.Dialogs.Hug.Action"),
+        callback: (html) => runHugFromDialog(sourceToken, liveTarget, readHugMessageFromDialog(html))
+      },
+      cancel: {
+        icon: '<i class="fa-solid fa-xmark"></i>',
+        label: localize("PATPAT.Dialogs.Common.Cancel")
+      }
+    },
+    default: "hug"
+  }).render(true);
+}
+
+function runHugFromDialog(sourceToken, targetToken, message) {
+  const liveSource = resolveLiveToken(sourceToken) ?? sourceToken;
+  const liveTarget = resolveLiveToken(targetToken) ?? targetToken;
+  return handleHugToken(liveSource, liveTarget, message).catch((error) => {
+    warn("Failed to handle token hug.", error);
+    ui.notifications?.warn(localize("PATPAT.Warnings.Generic"));
+  });
+}
+
 function openCalibrationDialog(token) {
   const liveToken = resolveLiveToken(token) ?? token;
   if (!liveToken) {
@@ -413,6 +505,38 @@ async function handlePatToken(token, intensity = getSetting("animationIntensity"
   broadcastPat(payload);
 }
 
+async function handleHugToken(sourceToken, targetToken, message = getDefaultHugMessage()) {
+  const liveSource = resolveLiveToken(sourceToken) ?? sourceToken;
+  const liveTarget = resolveLiveToken(targetToken) ?? targetToken;
+  if (!liveSource || !liveTarget) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const permission = canHugToken(liveSource, liveTarget);
+  if (!permission.allowed) {
+    ui.notifications?.warn(localize(permission.messageKey));
+    return;
+  }
+
+  const cooldown = checkCooldown(liveTarget, "hug");
+  if (!cooldown.allowed) {
+    ui.notifications?.warn(format("PATPAT.Warnings.Cooldown", { seconds: cooldown.remaining }));
+    return;
+  }
+
+  const safeMessage = normalizeHugMessage(message);
+  const payload = createHugPayload(liveSource, liveTarget, safeMessage);
+
+  playHugAnimation(liveSource, liveTarget, safeMessage);
+
+  if (getSetting("showChatMessage")) {
+    await sendHugChatMessage(liveSource, liveTarget, payload);
+  }
+
+  broadcastHug(payload);
+}
+
 function canPatToken(token) {
   if (game.user?.isGM) {
     return { allowed: true };
@@ -437,7 +561,26 @@ function canPatToken(token) {
   return { allowed: true };
 }
 
-function checkCooldown(token) {
+function canHugToken(sourceToken, targetToken) {
+  if (!sourceToken || !targetToken) {
+    return { allowed: false, messageKey: "PATPAT.Warnings.NoToken" };
+  }
+
+  if ((sourceToken.id ?? sourceToken.document?.id) === (targetToken.id ?? targetToken.document?.id)) {
+    return { allowed: false, messageKey: "PATPAT.Warnings.NoHugSource" };
+  }
+
+  const targetPermission = canPatToken(targetToken);
+  if (!targetPermission.allowed) return targetPermission;
+
+  if (game.user?.isGM || userOwnsToken(sourceToken)) {
+    return { allowed: true };
+  }
+
+  return { allowed: false, messageKey: "PATPAT.Warnings.NoHugSourcePermission" };
+}
+
+function checkCooldown(token, action = "pat") {
   if (game.user?.isGM) {
     return { allowed: true, remaining: 0 };
   }
@@ -452,7 +595,7 @@ function checkCooldown(token) {
     return { allowed: true, remaining: 0 };
   }
 
-  const key = `${game.user.id}:${tokenId}`;
+  const key = action === "pat" ? `${game.user.id}:${tokenId}` : `${game.user.id}:${action}:${tokenId}`;
   const now = Date.now();
   const expiresAt = cooldowns.get(key) ?? 0;
 
@@ -573,6 +716,107 @@ function playDomPatAnimation(token, intensity, message, offsetOverride = null) {
   window.setTimeout(() => effect.remove(), duration + 650);
 }
 
+function playHugAnimation(sourceToken, targetToken, message = getDefaultHugMessage()) {
+  if (!sourceToken || !targetToken || !canvas?.ready) return;
+
+  const safeMessage = normalizeHugMessage(message);
+  if (playPixiHugAnimation(sourceToken, targetToken, safeMessage)) {
+    return;
+  }
+
+  playDomHugAnimation(sourceToken, targetToken, safeMessage);
+}
+
+function playPixiHugAnimation(sourceToken, targetToken, message) {
+  const PIXIConstructor = globalThis.PIXI;
+  const parent = getPixiEffectParent();
+  const ticker = canvas?.app?.ticker;
+
+  if (!PIXIConstructor || !parent?.addChild || !ticker) return false;
+
+  const endpoints = getHugWorldEndpoints(sourceToken, targetToken);
+  if (!endpoints) {
+    warn("Unable to determine token world positions for PIXI hug animation.", { sourceToken, targetToken });
+    return false;
+  }
+
+  let cleanupEffect = null;
+
+  try {
+    const effect = createPixiHugEffect(PIXIConstructor, message);
+    const sourceFeedback = createTokenFeedbackAnimator(sourceToken, "gentle");
+    const targetFeedback = createTokenFeedbackAnimator(targetToken, "gentle");
+    const startedAt = performance.now();
+    let cleaned = false;
+
+    positionHugEffect(effect, endpoints);
+    parent.addChild(effect);
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      ticker.remove(tick, effect);
+      sourceFeedback?.cleanup();
+      targetFeedback?.cleanup();
+      if (effect.parent) effect.parent.removeChild(effect);
+      if (!effect.destroyed) effect.destroy({ children: true });
+    };
+    cleanupEffect = cleanup;
+
+    const tick = () => {
+      const elapsed = performance.now() - startedAt;
+      const progress = Math.min(1, elapsed / HUG_EFFECT_DURATION);
+      const nextEndpoints = getHugWorldEndpoints(sourceToken, targetToken);
+      if (nextEndpoints) positionHugEffect(effect, nextEndpoints);
+
+      updatePixiHugEffect(effect, elapsed, progress);
+      sourceFeedback?.update(progress);
+      targetFeedback?.update(progress);
+
+      if (progress >= 1) cleanup();
+    };
+
+    ticker.add(tick, effect, PIXIConstructor.UPDATE_PRIORITY?.LOW ?? 0);
+    tick();
+    window.setTimeout(cleanup, HUG_EFFECT_DURATION + 900);
+    return true;
+  } catch (error) {
+    cleanupEffect?.();
+    warn("PIXI hug animation failed; using DOM fallback.", error);
+    return false;
+  }
+}
+
+function playDomHugAnimation(sourceToken, targetToken, message) {
+  const endpoints = getHugScreenEndpoints(sourceToken, targetToken);
+  if (!endpoints) {
+    warn("Unable to determine token screen positions for hug animation.", { sourceToken, targetToken });
+    return;
+  }
+
+  const overlay = ensureOverlay();
+  if (!overlay) return;
+
+  const midpoint = getMidpoint(endpoints.source, endpoints.target);
+  const effect = document.createElement("div");
+  effect.className = "pat-pat-party-hug-effect";
+  effect.style.left = `${Math.round(midpoint.x)}px`;
+  effect.style.top = `${Math.round(midpoint.y)}px`;
+  effect.style.setProperty("--ppp-duration", `${HUG_EFFECT_DURATION}ms`);
+  effect.innerHTML = `
+    <div class="pat-pat-party-hug-ribbon" aria-hidden="true"></div>
+    <div class="pat-pat-party-hug-symbol" aria-hidden="true">&#x1F917;</div>
+    <div class="pat-pat-party-hug-heart" aria-hidden="true">&#x1F49E;</div>
+    <div class="pat-pat-party-hug-particles" aria-hidden="true">${createHugParticleMarkup()}</div>
+    <div class="pat-pat-party-floating-text">${escapeHtml(normalizeHugMessage(message))}</div>
+  `;
+
+  overlay.appendChild(effect);
+  playTokenSpriteFeedback(sourceToken, "gentle", HUG_EFFECT_DURATION);
+  playTokenSpriteFeedback(targetToken, "gentle", HUG_EFFECT_DURATION);
+  window.setTimeout(() => effect.remove(), HUG_EFFECT_DURATION + 650);
+}
+
 async function sendPatChatMessage(token, payload) {
   if (!token) return;
 
@@ -597,6 +841,33 @@ async function sendPatChatMessage(token, payload) {
   });
 }
 
+async function sendHugChatMessage(sourceToken, targetToken, payload) {
+  if (!sourceToken || !targetToken) return;
+
+  const message = normalizeHugMessage(payload.message ?? localize(payload.messageKey ?? "PATPAT.Hug.Chat.Message"));
+  const speaker = getChatSpeaker(sourceToken);
+  const content = `
+    <div class="pat-pat-party-chat-card pat-pat-party-hug-chat-card">
+      <header class="pat-pat-party-chat-header">
+        <i class="fa-solid fa-heart" aria-hidden="true"></i>
+        <span>${escapeHtml(localize("PATPAT.Hug.Chat.Title"))}</span>
+      </header>
+      <p class="pat-pat-party-chat-line">${escapeHtml(format("PATPAT.Hug.Chat.Line", {
+        actor: getTokenName(sourceToken),
+        target: getTokenName(targetToken)
+      }))}</p>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+
+  await ChatMessage.create({
+    user: game.user?.id,
+    speaker,
+    content,
+    flavor: localize("PATPAT.Hug.Chat.Flavor")
+  });
+}
+
 function broadcastPat(payload) {
   if (!game.socket) {
     warn("Socket is unavailable; animation will remain local.");
@@ -610,9 +881,27 @@ function broadcastPat(payload) {
   }
 }
 
+function broadcastHug(payload) {
+  if (!game.socket) {
+    warn("Socket is unavailable; hug animation will remain local.");
+    return;
+  }
+
+  try {
+    game.socket.emit(SOCKET_NAME, payload);
+  } catch (error) {
+    warn("Failed to broadcast hug animation.", error);
+  }
+}
+
 function handleSocketMessage(payload) {
   if (payload?.action === "pat") {
     handleSocketPat(payload);
+    return;
+  }
+
+  if (payload?.action === "hug") {
+    handleSocketHug(payload);
     return;
   }
 
@@ -635,6 +924,21 @@ function handleSocketPat(payload) {
   }
 
   playPatAnimation(token, payload.intensity, payload.message, payload.offset);
+}
+
+function handleSocketHug(payload) {
+  if (!canvas?.ready || !canvas.scene) return;
+  if (payload.sceneId !== canvas.scene.id) return;
+  if (payload.userId === game.user?.id) return;
+
+  const sourceToken = getCanvasToken(payload.sourceTokenId);
+  const targetToken = getCanvasToken(payload.targetTokenId);
+  if (!sourceToken || !targetToken) {
+    debug("Received hug socket payload for tokens that are not on this canvas.", payload);
+    return;
+  }
+
+  playHugAnimation(sourceToken, targetToken, payload.message);
 }
 
 async function handleSocketSetPatOffset(payload) {
@@ -720,6 +1024,21 @@ function createPatPayload(token, intensity, message = getDefaultPatMessage()) {
   };
 }
 
+function createHugPayload(sourceToken, targetToken, message = getDefaultHugMessage()) {
+  return {
+    action: "hug",
+    sceneId: canvas?.scene?.id,
+    sourceTokenId: sourceToken?.id ?? sourceToken?.document?.id,
+    targetTokenId: targetToken?.id ?? targetToken?.document?.id,
+    userId: game.user?.id,
+    userName: game.user?.name,
+    sourceName: getTokenName(sourceToken),
+    targetName: getTokenName(targetToken),
+    messageKey: "PATPAT.Hug.Chat.Message",
+    message: normalizeHugMessage(message)
+  };
+}
+
 function getHtmlElement(html) {
   if (html instanceof HTMLElement) return html;
   if (html?.[0] instanceof HTMLElement) return html[0];
@@ -752,6 +1071,14 @@ function readPatMessageFromDialog(html) {
   return normalizePatMessage(formData.get("message"));
 }
 
+function readHugMessageFromDialog(html) {
+  const form = getDialogForm(html);
+  if (!form) return getDefaultHugMessage();
+
+  const formData = new FormData(form);
+  return normalizeHugMessage(formData.get("message"));
+}
+
 function getTokenFromHud(app, data) {
   const hudObject = app?.object;
   if (isCanvasToken(hudObject)) return hudObject;
@@ -777,6 +1104,34 @@ function getCanvasToken(tokenId) {
     canvas.tokens.placeables?.find((token) => token.id === tokenId || token.document?.id === tokenId) ??
     null
   );
+}
+
+function getHugSourceToken(targetToken) {
+  const targetId = targetToken?.id ?? targetToken?.document?.id;
+  const controlled = canvas?.tokens?.controlled ?? [];
+  const selectedSource = controlled.find((token) => {
+    const tokenId = token?.id ?? token?.document?.id;
+    if (!tokenId || tokenId === targetId) return false;
+    return game.user?.isGM || userOwnsToken(token);
+  });
+  if (selectedSource) return selectedSource;
+
+  const characterToken = getUserCharacterToken(targetId);
+  if (characterToken) return characterToken;
+
+  return null;
+}
+
+function getUserCharacterToken(excludeTokenId = null) {
+  const characterId = game.user?.character?.id;
+  if (!characterId || !canvas?.tokens?.placeables) return null;
+
+  return canvas.tokens.placeables.find((token) => {
+    const tokenId = token?.id ?? token?.document?.id;
+    if (!tokenId || tokenId === excludeTokenId) return false;
+    const actorId = token?.actor?.id ?? token?.document?.actorId ?? token?.document?.actor?.id;
+    return actorId === characterId && (game.user?.isGM || userOwnsToken(token));
+  }) ?? null;
 }
 
 function getSceneTokenDocument(sceneId, tokenId) {
@@ -859,6 +1214,20 @@ function getTokenScreenPosition(token, offsetOverride = null) {
   };
 }
 
+function getHugWorldEndpoints(sourceToken, targetToken) {
+  const source = getTokenCenter(sourceToken);
+  const target = getTokenCenter(targetToken);
+  if (!source || !target) return null;
+  return { source, target };
+}
+
+function getHugScreenEndpoints(sourceToken, targetToken) {
+  const source = getTokenCenterScreenPosition(sourceToken);
+  const target = getTokenCenterScreenPosition(targetToken);
+  if (!source || !target) return null;
+  return { source, target };
+}
+
 function getTokenTopCenterWorldPosition(token, offsetOverride = null) {
   const center = getTokenCenter(token);
   if (!center) return null;
@@ -902,6 +1271,36 @@ function getTokenTopCenterScreenPosition(token) {
     return {
       x: bounds.x + bounds.width / 2,
       y: bounds.y
+    };
+  }
+
+  return null;
+}
+
+function getTokenCenterScreenPosition(token) {
+  const center = getTokenCenter(token);
+  if (!center) return null;
+
+  try {
+    const transformed = canvas?.stage?.worldTransform?.apply?.(center);
+    const view = canvas?.app?.view ?? canvas?.app?.renderer?.view ?? document.querySelector("#board canvas");
+    const rect = view?.getBoundingClientRect?.();
+
+    if (transformed && rect) {
+      return {
+        x: rect.left + transformed.x,
+        y: rect.top + transformed.y
+      };
+    }
+  } catch (error) {
+    debug("Stage center coordinate conversion failed; trying token bounds fallback.", error);
+  }
+
+  const bounds = token?.bounds ?? token?.getBounds?.();
+  if (bounds) {
+    return {
+      x: bounds.x + bounds.width / 2,
+      y: bounds.y + bounds.height / 2
     };
   }
 
@@ -1015,6 +1414,33 @@ function createRubArcMarkup(intensity) {
     ].join("; ");
 
     return `<span class="pat-pat-party-rub-arc" style="${style};"></span>`;
+  }).join("");
+}
+
+function createHugParticleMarkup() {
+  const particleCount = randomInt(HUG_PARTICLE_CONFIG.count[0], HUG_PARTICLE_CONFIG.count[1]);
+
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const driftX = side * randomBetween(HUG_PARTICLE_CONFIG.drift * 0.25, HUG_PARTICLE_CONFIG.drift);
+    const startX = randomBetween(-42, 42);
+    const rise = randomBetween(HUG_PARTICLE_CONFIG.rise[0], HUG_PARTICLE_CONFIG.rise[1]);
+    const delay = randomInt(HUG_PARTICLE_CONFIG.delay[0], HUG_PARTICLE_CONFIG.delay[1]);
+    const size = randomInt(HUG_PARTICLE_CONFIG.size[0], HUG_PARTICLE_CONFIG.size[1]);
+    const scale = randomBetween(0.85, 1.28);
+    const rotate = randomBetween(-24, 24);
+    const symbol = pick(HUG_PARTICLE_CONFIG.symbols);
+    const style = [
+      `--ppp-start-x: ${startX.toFixed(1)}px`,
+      `--ppp-drift-x: ${driftX.toFixed(1)}px`,
+      `--ppp-rise-y: -${rise.toFixed(1)}px`,
+      `--ppp-delay: ${delay}ms`,
+      `--ppp-particle-size: ${size}px`,
+      `--ppp-particle-scale: ${scale.toFixed(2)}`,
+      `--ppp-rotate: ${rotate.toFixed(1)}deg`
+    ].join("; ");
+
+    return `<span class="pat-pat-party-particle" style="${style};">${symbol}</span>`;
   }).join("");
 }
 
@@ -1199,6 +1625,109 @@ function createPixiFloatingText(PIXIConstructor, message) {
   return { group, bubble, label };
 }
 
+function createPixiHugEffect(PIXIConstructor, message) {
+  const effect = new PIXIConstructor.Container();
+  effect.name = `${MODULE_ID}-pixi-hug-effect`;
+  effect.eventMode = "none";
+  effect.interactiveChildren = false;
+  effect.sortableChildren = true;
+  effect.zIndex = Number(CONFIG?.Canvas?.groups?.interface?.zIndexScrollingText ?? 700) + 22;
+
+  const ribbon = new PIXIConstructor.Graphics();
+  ribbon.name = `${MODULE_ID}-hug-ribbon`;
+  const glow = new PIXIConstructor.Graphics();
+  glow.name = `${MODULE_ID}-hug-glow`;
+  const hugIcon = createPixiText(PIXIConstructor, HUG_SYMBOL, {
+    fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+    fontSize: 38,
+    dropShadow: true,
+    dropShadowAlpha: 0.24,
+    dropShadowBlur: 4,
+    dropShadowDistance: 2
+  });
+  setPixiAnchor(hugIcon, 0.5);
+  hugIcon.alpha = 0;
+
+  const heart = createPixiText(PIXIConstructor, HUG_HEART_SYMBOL, {
+    fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+    fontSize: 31,
+    dropShadow: true,
+    dropShadowAlpha: 0.24,
+    dropShadowBlur: 4,
+    dropShadowDistance: 1
+  });
+  setPixiAnchor(heart, 0.5);
+  heart.alpha = 0;
+
+  const particles = createPixiHugParticles(PIXIConstructor);
+  const floatingText = createPixiFloatingText(PIXIConstructor, normalizeHugMessage(message));
+
+  glow.zIndex = 1;
+  ribbon.zIndex = 2;
+  particles.forEach((particle) => particle.text.zIndex = 3);
+  hugIcon.zIndex = 4;
+  heart.zIndex = 5;
+  floatingText.group.zIndex = 6;
+
+  effect.addChild(glow);
+  effect.addChild(ribbon);
+  for (const particle of particles) effect.addChild(particle.text);
+  effect.addChild(hugIcon);
+  effect.addChild(heart);
+  effect.addChild(floatingText.group);
+
+  effect.patPatParty = {
+    ribbon,
+    glow,
+    hugIcon,
+    heart,
+    particles,
+    floatingText,
+    endpoints: null
+  };
+
+  return effect;
+}
+
+function createPixiHugParticles(PIXIConstructor) {
+  const particleCount = randomInt(HUG_PARTICLE_CONFIG.count[0], HUG_PARTICLE_CONFIG.count[1]);
+
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const startX = randomBetween(-36, 36);
+    const startY = randomBetween(-12, 18);
+    const driftX = side * randomBetween(HUG_PARTICLE_CONFIG.drift * 0.25, HUG_PARTICLE_CONFIG.drift);
+    const rise = randomBetween(HUG_PARTICLE_CONFIG.rise[0], HUG_PARTICLE_CONFIG.rise[1]);
+    const delay = randomInt(HUG_PARTICLE_CONFIG.delay[0], HUG_PARTICLE_CONFIG.delay[1]);
+    const size = randomInt(HUG_PARTICLE_CONFIG.size[0], HUG_PARTICLE_CONFIG.size[1]);
+    const targetScale = randomBetween(0.88, 1.3);
+    const rotation = randomBetween(-0.42, 0.42);
+    const text = createPixiText(PIXIConstructor, pick(HUG_PARTICLE_CONFIG.symbols), {
+      fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+      fontSize: size,
+      dropShadow: true,
+      dropShadowAlpha: 0.24,
+      dropShadowBlur: 3,
+      dropShadowDistance: 1
+    });
+    setPixiAnchor(text, 0.5);
+    text.alpha = 0;
+    text.position.set(startX, startY);
+
+    return {
+      text,
+      delay,
+      duration: 960,
+      startX,
+      startY,
+      driftX,
+      rise,
+      targetScale,
+      rotation
+    };
+  });
+}
+
 function updatePixiPatEffect(effect, intensity, config, elapsed, progress, duration) {
   const parts = effect.patPatParty;
   if (!parts) return;
@@ -1305,6 +1834,89 @@ function updatePixiFloatingText(textGroup, config, elapsed, progress, duration) 
   textGroup.alpha = Math.max(0, Math.min(fadeIn, fadeOut));
   textGroup.y = -76 - config.textRise * easeOutCubic(t);
   textGroup.scale.set(lerp(0.92, 1, easeOutBack(Math.min(1, t * 1.4))));
+}
+
+function positionHugEffect(effect, endpoints) {
+  const midpoint = getMidpoint(endpoints.source, endpoints.target);
+  const scale = getCanvasStageScale();
+
+  effect.position.set(midpoint.x, midpoint.y);
+  effect.scale.set(getInverseCanvasScale());
+
+  if (effect.patPatParty) {
+    effect.patPatParty.endpoints = {
+      source: {
+        x: (endpoints.source.x - midpoint.x) * scale,
+        y: (endpoints.source.y - midpoint.y) * scale
+      },
+      target: {
+        x: (endpoints.target.x - midpoint.x) * scale,
+        y: (endpoints.target.y - midpoint.y) * scale
+      }
+    };
+  }
+}
+
+function updatePixiHugEffect(effect, elapsed, progress) {
+  const parts = effect.patPatParty;
+  if (!parts?.endpoints) return;
+
+  const { source, target } = parts.endpoints;
+  const midpoint = { x: 0, y: 0 };
+  const controlY = Math.min(source.y, target.y, -12) - 44;
+  const envelope = Math.sin(progress * Math.PI);
+  const lineAlpha = Math.max(0, Math.min(0.86, envelope * 0.86));
+
+  drawPixiHugGlow(parts.glow, source, target, envelope);
+  drawPixiHugRibbon(parts.ribbon, source, target, controlY, lineAlpha);
+
+  const iconIn = easeOutBack(Math.min(1, progress / 0.22));
+  const iconOut = 1 - easeInCubic(Math.max(0, (progress - 0.78) / 0.22));
+  const iconAlpha = Math.max(0, Math.min(iconIn, iconOut));
+  const nuzzle = Math.sin(progress * Math.PI * 6) * envelope;
+
+  parts.hugIcon.alpha = iconAlpha;
+  parts.hugIcon.x = midpoint.x + nuzzle * 4;
+  parts.hugIcon.y = controlY + 18 - envelope * 8;
+  parts.hugIcon.rotation = nuzzle * 0.08;
+  parts.hugIcon.scale.set(lerp(0.78, 1.08, iconIn) * (1 + envelope * 0.04));
+
+  parts.heart.alpha = Math.max(0, Math.min(easeOutCubic(progress / 0.28), iconOut));
+  parts.heart.x = midpoint.x - nuzzle * 3;
+  parts.heart.y = controlY + 50 - envelope * 18;
+  parts.heart.rotation = -nuzzle * 0.05;
+  parts.heart.scale.set(0.86 + envelope * 0.18);
+
+  updatePixiParticles(parts.particles, elapsed);
+  updatePixiFloatingText(parts.floatingText.group, { textRise: 58 }, elapsed, progress, HUG_EFFECT_DURATION);
+}
+
+function drawPixiHugGlow(glow, source, target, envelope) {
+  glow.clear();
+  if (envelope <= 0) return;
+
+  glow.beginFill(0xff9cca, 0.2 * envelope);
+  glow.drawEllipse(source.x, source.y + 10, 42, 16);
+  glow.drawEllipse(target.x, target.y + 10, 42, 16);
+  glow.endFill();
+  glow.beginFill(0x8ff5df, 0.12 * envelope);
+  glow.drawEllipse(0, Math.min(source.y, target.y) - 10, Math.max(54, Math.abs(target.x - source.x) * 0.42), 24);
+  glow.endFill();
+}
+
+function drawPixiHugRibbon(ribbon, source, target, controlY, alpha) {
+  ribbon.clear();
+  if (alpha <= 0) return;
+
+  ribbon.lineStyle({ width: 6, color: 0xffffff, alpha: alpha * 0.35, cap: globalThis.PIXI?.LINE_CAP?.ROUND });
+  ribbon.moveTo(source.x, source.y - 10);
+  ribbon.quadraticCurveTo(0, controlY, target.x, target.y - 10);
+  ribbon.lineStyle({ width: 3, color: 0xff8ec3, alpha, cap: globalThis.PIXI?.LINE_CAP?.ROUND });
+  ribbon.moveTo(source.x, source.y - 10);
+  ribbon.quadraticCurveTo(0, controlY, target.x, target.y - 10);
+  ribbon.lineStyle({ width: 2, color: 0x7ee6d2, alpha: alpha * 0.78, cap: globalThis.PIXI?.LINE_CAP?.ROUND });
+  ribbon.moveTo(source.x, source.y - 2);
+  ribbon.quadraticCurveTo(0, controlY + 16, target.x, target.y - 2);
 }
 
 function playTokenSpriteFeedback(token, intensity, duration) {
@@ -1419,12 +2031,25 @@ function getDefaultPatMessage() {
   return truncateText(localize("PATPAT.Chat.Message"), MAX_MESSAGE_LENGTH);
 }
 
+function getDefaultHugMessage() {
+  return truncateText(localize("PATPAT.Hug.Chat.Message"), MAX_MESSAGE_LENGTH);
+}
+
 function normalizePatMessage(value) {
   const normalized = String(value ?? "")
     .replace(/\s+/g, " ")
     .trim();
 
   if (!normalized) return getDefaultPatMessage();
+  return truncateText(normalized, MAX_MESSAGE_LENGTH);
+}
+
+function normalizeHugMessage(value) {
+  const normalized = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return getDefaultHugMessage();
   return truncateText(normalized, MAX_MESSAGE_LENGTH);
 }
 
@@ -1443,6 +2068,13 @@ function randomBetween(min, max) {
 function pick(values) {
   if (!Array.isArray(values) || values.length === 0) return "";
   return values[Math.floor(Math.random() * values.length)];
+}
+
+function getMidpoint(a, b) {
+  return {
+    x: (Number(a?.x) + Number(b?.x)) / 2,
+    y: (Number(a?.y) + Number(b?.y)) / 2
+  };
 }
 
 function lerp(from, to, progress) {

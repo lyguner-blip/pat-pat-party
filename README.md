@@ -2,18 +2,20 @@
 
 Pat Pat Party（摸摸头小队）是一个轻量、可爱、不打断跑团流程的 FoundryVTT Token 互动模组。玩家可以通过 Token HUD 对队友或允许的目标使用“摸摸头”，画布上会出现短动画，并可在聊天栏发送温暖的小文案。
 
-当前版本：`0.0.4 - PIXI 摸头动画优化`(感谢三耳老师的大力挥鞭）
+当前版本：`0.0.5 - 抱抱互动基础版`（感谢三耳老师的大力挥鞭）
 
 English summary: a tiny system-agnostic FoundryVTT module for cute token pat-pat animations and localized chat messages.
 
 ## 功能列表
 
 - 在 Token HUD 上添加“摸摸头”按钮和“校准摸头位置”按钮。
+- 在 Token HUD 上添加“抱抱”按钮，可让一个已选中/归属自己的 Token 与目标 Token 触发贴贴互动。
 - 点击“摸摸头”后选择三种力度：轻柔摸、普通摸、大力逆毛摸。
 - 在力度选择窗口中自定义一句摸头文案，默认是“亲密度上升↑”。
 - 自定义文案会同时显示为 Token 上方浮动文字和聊天卡片内容。
 - 优先使用 PIXI/Canvas 临时容器播放小手从右上滑入、左右揉搓、上浮淡出的 Q 版动画。
 - 爱心、小花、星星粒子会分批冒出，并按三种力度改变数量和幅度。
+- 抱抱互动会在两个 Token 中间播放贴贴弧线、抱抱表情、爱心和粒子，并发送温暖聊天卡片。
 - 支持为每个 Token 持久化校准摸头位置，数据保存到 Token Document flag。
 - 使用 Foundry socket 广播动画，让同场景在线玩家也能看到。
 - 可选发送本地化聊天卡片。
@@ -34,12 +36,12 @@ https://raw.githubusercontent.com/lyguner-blip/pat-pat-party/main/module.json
 `module.json` 中的下载地址指向 GitHub Release ZIP：
 
 ```text
-https://github.com/lyguner-blip/pat-pat-party/releases/download/v0.0.4/pat-pat-party-0.0.4.zip
+https://github.com/lyguner-blip/pat-pat-party/releases/download/v0.0.5/pat-pat-party-0.0.5.zip
 ```
 
 ### 手动安装
 
-1. 从 GitHub Release 下载 `pat-pat-party-0.0.4.zip`。
+1. 从 GitHub Release 下载 `pat-pat-party-0.0.5.zip`。
 2. 解压后确认目录名为 `pat-pat-party`，且目录内直接包含 `module.json`。
 3. 将 `pat-pat-party` 文件夹放入 Foundry 的 `Data/modules/` 目录。
 4. 重启 FoundryVTT，进入世界后在“管理模组”中启用 `Pat Pat Party`。
@@ -52,6 +54,14 @@ https://github.com/lyguner-blip/pat-pat-party/releases/download/v0.0.4/pat-pat-p
 4. 若权限与冷却检查通过，目标 Token 上方会播放对应力度的摸摸头动画。
 5. 若启用了聊天消息，聊天栏会出现同一句摸头文案。
 6. 如动画位置不准，点击 Token HUD 上的准星按钮，调整 X/Y 偏移并保存。
+
+### 抱抱
+
+1. 先选中一个自己拥有的 Token 作为抱抱发起者。
+2. 打开另一个 Token 的 Token HUD。
+3. 点击爱心图标按钮。
+4. 输入可选文案后确认“抱抱”。
+5. 两个 Token 中间会播放贴贴/爱心动画；如果启用了聊天消息，聊天栏会显示同一句文案。
 
 ## 三种力度
 
@@ -84,10 +94,11 @@ https://github.com/lyguner-blip/pat-pat-party/releases/download/v0.0.4/pat-pat-p
 - 冷却保存在客户端内存中，刷新页面或重新进入世界后会重置。
 - Socket 同步只负责动画广播，聊天消息由触发者创建一次。
 - 普通玩家校准自己没有文档权限的 Token 时，需要至少一名 GM 在线代写 Token flag。
+- 抱抱互动需要先解析一个不同于目标的发起 Token；普通玩家通常需要先选中自己拥有的 Token。
 
 ## 后续计划
 
-- 抱抱互动已进入后续开发计划：选中队友 Token → 抱抱 → 两个 Token 之间出现贴贴/爱心动画 → 聊天栏提示温暖文案。
+- 抱抱互动基础版已加入，后续会继续打磨双 Token 动画表现与选择流程。
 - 更多互动动作：击掌、拍肩、递茶、送花。
 - 自定义动画图标。
 - 角色关系/权限细分。

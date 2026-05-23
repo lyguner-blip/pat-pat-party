@@ -2,6 +2,7 @@
   "PATPAT": {
     "Controls": {
       "Pat": "Pat Pat",
+      "Hug": "Hug",
       "Calibrate": "Calibrate Pat Position"
     },
     "Intensity": {
@@ -49,6 +50,15 @@
         "MessagePlaceholder": "Closeness increased ↑",
         "MessageHint": "Shown above the token and in chat. Up to {max} characters; leave blank to use the default."
       },
+      "Hug": {
+        "Title": "Give a Teammate a Hug",
+        "Source": "Source Token",
+        "Target": "Target Token",
+        "MessageLabel": "Message",
+        "MessagePlaceholder": "Hug energy restored ♡",
+        "MessageHint": "Shown between the two tokens and in chat. Up to {max} characters; leave blank to use the default.",
+        "Action": "Hug"
+      },
       "Calibration": {
         "Title": "Calibrate Pat Position",
         "Token": "Token",
@@ -66,6 +76,8 @@
       "NoPermission": "You do not have permission to pat this token.",
       "HostileNotAllowed": "Hostile tokens cannot be patted with the current settings.",
       "NoToken": "No valid target token was found.",
+      "NoHugSource": "Select one token you own first, then use Hug on another token.",
+      "NoHugSourcePermission": "You can only start a hug from a token you own.",
       "NoCalibrationPermission": "You cannot save a pat position for this token right now.",
       "Generic": "Pat Pat Party could not complete that interaction."
     },
@@ -74,6 +86,14 @@
       "Flavor": "A tiny token interaction",
       "Message": "Closeness increased ↑",
       "UnknownTarget": "the token"
+    },
+    "Hug": {
+      "Chat": {
+        "Title": "Hug Party",
+        "Flavor": "A warm token interaction",
+        "Message": "Hug energy restored ♡",
+        "Line": "{actor} gives {target} a hug."
+      }
     }
   }
 }
