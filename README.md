@@ -2,7 +2,7 @@
 
 Pat Pat Party（摸摸头小队）是一个轻量、可爱、不打断跑团流程的 FoundryVTT Token 互动模组。玩家可以通过 Token HUD 对队友或允许的目标使用“摸摸头”，画布上会出现短动画，并可在聊天栏发送温暖的小文案。
 
-当前版本：`0.0.4 - PIXI 摸头动画优化`
+当前版本：`0.0.4 - PIXI 摸头动画优化`(感谢三耳老师的大力挥鞭）
 
 English summary: a tiny system-agnostic FoundryVTT module for cute token pat-pat animations and localized chat messages.
 
