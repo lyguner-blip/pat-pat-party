@@ -1,0 +1,76 @@
+{
+  "PATPAT": {
+    "Controls": {
+      "Pat": "Pat Pat",
+      "Calibrate": "Calibrate Pat Position"
+    },
+    "Intensity": {
+      "Gentle": "Gentle Pat",
+      "Normal": "Normal Pat",
+      "Rough": "Rough Pat"
+    },
+    "Settings": {
+      "AllowPlayersPatOthers": {
+        "Name": "Allow players to pat other tokens",
+        "Hint": "When enabled, non-GM users can pat tokens they do not own, subject to hostile token restrictions."
+      },
+      "AllowPatHostile": {
+        "Name": "Allow patting hostile tokens",
+        "Hint": "When disabled, non-GM users cannot pat tokens with hostile disposition."
+      },
+      "ShowChatMessage": {
+        "Name": "Show chat messages",
+        "Hint": "Send a small localized chat card whenever someone uses Pat Pat."
+      },
+      "CooldownSeconds": {
+        "Name": "Cooldown seconds",
+        "Hint": "Per-user, per-target cooldown in seconds. Set to 0 to disable cooldowns."
+      },
+      "AnimationIntensity": {
+        "Name": "Default pat intensity",
+        "Hint": "The default intensity selected when opening the Pat Pat dialog.",
+        "Choices": {
+          "Gentle": "Gentle Pat",
+          "Normal": "Normal Pat",
+          "Rough": "Rough Pat"
+        }
+      }
+    },
+    "Dialogs": {
+      "Common": {
+        "Save": "Save",
+        "Cancel": "Cancel",
+        "Reset": "Reset"
+      },
+      "Pat": {
+        "Title": "Choose Pat Intensity",
+        "Target": "Target"
+      },
+      "Calibration": {
+        "Title": "Calibrate Pat Position",
+        "Token": "Token",
+        "XOffset": "X offset",
+        "YOffset": "Y offset",
+        "Hint": "Offsets are screen pixels relative to the token's top-center point. Suggested range: -300 to 300."
+      }
+    },
+    "Notifications": {
+      "CalibrationSaved": "Pat position saved.",
+      "CalibrationRequested": "Pat position save requested from an active GM."
+    },
+    "Warnings": {
+      "Cooldown": "Pat Pat is on cooldown for this token. Try again in {seconds} seconds.",
+      "NoPermission": "You do not have permission to pat this token.",
+      "HostileNotAllowed": "Hostile tokens cannot be patted with the current settings.",
+      "NoToken": "No valid target token was found.",
+      "NoCalibrationPermission": "You cannot save a pat position for this token right now.",
+      "Generic": "Pat Pat Party could not complete that interaction."
+    },
+    "Chat": {
+      "Title": "Pat Pat Party",
+      "Flavor": "A tiny token interaction",
+      "Message": "Closeness increased ↑",
+      "UnknownTarget": "the token"
+    }
+  }
+}

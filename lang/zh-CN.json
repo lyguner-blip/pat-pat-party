@@ -1,0 +1,76 @@
+{
+  "PATPAT": {
+    "Controls": {
+      "Pat": "摸摸头",
+      "Calibrate": "校准摸头位置"
+    },
+    "Intensity": {
+      "Gentle": "轻柔摸",
+      "Normal": "普通摸",
+      "Rough": "大力逆毛摸"
+    },
+    "Settings": {
+      "AllowPlayersPatOthers": {
+        "Name": "允许玩家摸其他 Token",
+        "Hint": "启用后，非 GM 用户可以摸自己不拥有的 Token；是否能摸敌对 Token 仍受敌对 Token 设置限制。"
+      },
+      "AllowPatHostile": {
+        "Name": "允许摸敌对 Token",
+        "Hint": "关闭后，非 GM 用户不能摸 disposition 为敌对的 Token。"
+      },
+      "ShowChatMessage": {
+        "Name": "显示聊天消息",
+        "Hint": "使用摸摸头互动时，在聊天栏发送一张轻量本地化聊天卡片。"
+      },
+      "CooldownSeconds": {
+        "Name": "冷却秒数",
+        "Hint": "每位用户对每个目标 Token 的独立冷却时间。设为 0 可关闭冷却。"
+      },
+      "AnimationIntensity": {
+        "Name": "默认摸头力度",
+        "Hint": "打开摸摸头选择窗口时默认选中的力度。",
+        "Choices": {
+          "Gentle": "轻柔摸",
+          "Normal": "普通摸",
+          "Rough": "大力逆毛摸"
+        }
+      }
+    },
+    "Dialogs": {
+      "Common": {
+        "Save": "保存",
+        "Cancel": "取消",
+        "Reset": "重置"
+      },
+      "Pat": {
+        "Title": "选择摸头力度",
+        "Target": "目标"
+      },
+      "Calibration": {
+        "Title": "校准摸头位置",
+        "Token": "当前 Token",
+        "XOffset": "X 偏移",
+        "YOffset": "Y 偏移",
+        "Hint": "偏移单位为屏幕像素，相对于 Token 顶部中心点。建议范围：-300 到 300。"
+      }
+    },
+    "Notifications": {
+      "CalibrationSaved": "摸头位置已保存。",
+      "CalibrationRequested": "已请求在线 GM 保存摸头位置。"
+    },
+    "Warnings": {
+      "Cooldown": "这个 Token 的摸摸头还在冷却中，请 {seconds} 秒后再试。",
+      "NoPermission": "你没有权限摸这个 Token。",
+      "HostileNotAllowed": "当前设置不允许摸敌对 Token。",
+      "NoToken": "没有找到有效的目标 Token。",
+      "NoCalibrationPermission": "你现在不能保存这个 Token 的摸头位置。",
+      "Generic": "摸摸头小队未能完成这次互动。"
+    },
+    "Chat": {
+      "Title": "摸摸头小队",
+      "Flavor": "一次小小的 Token 互动",
+      "Message": "亲密度上升↑",
+      "UnknownTarget": "这个 Token"
+    }
+  }
+}
