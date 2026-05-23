@@ -44,7 +44,10 @@
       },
       "Pat": {
         "Title": "选择摸头力度",
-        "Target": "目标"
+        "Target": "目标",
+        "MessageLabel": "显示文案",
+        "MessagePlaceholder": "亲密度上升↑",
+        "MessageHint": "会显示在 Token 上方和聊天卡片中。最多 {max} 个字符；留空则使用默认文案。"
       },
       "Calibration": {
         "Title": "校准摸头位置",

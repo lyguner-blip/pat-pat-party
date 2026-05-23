@@ -44,7 +44,10 @@
       },
       "Pat": {
         "Title": "Choose Pat Intensity",
-        "Target": "Target"
+        "Target": "Target",
+        "MessageLabel": "Message",
+        "MessagePlaceholder": "Closeness increased ↑",
+        "MessageHint": "Shown above the token and in chat. Up to {max} characters; leave blank to use the default."
       },
       "Calibration": {
         "Title": "Calibrate Pat Position",

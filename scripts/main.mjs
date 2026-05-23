@@ -6,6 +6,7 @@ const HUD_PAT_BUTTON_CLASS = "pat-pat-party-hud-button";
 const HUD_CALIBRATE_BUTTON_CLASS = "pat-pat-party-calibrate-hud-button";
 const OVERLAY_ID = "pat-pat-party-overlay";
 const PAT_OFFSET_FLAG = "patOffset";
+const MAX_MESSAGE_LENGTH = 40;
 
 const INTENSITIES = ["gentle", "normal", "rough"];
 const LEGACY_INTENSITY_MAP = {
@@ -21,38 +22,53 @@ const DEFAULT_SETTINGS = {
   animationIntensity: "normal"
 };
 
-const HEARTS_BY_INTENSITY = {
-  gentle: [
-    { symbol: "&#x1F497;", dx: -16, dy: -42, delay: 120, scale: 0.9 },
-    { symbol: "&#x1F497;", dx: 20, dy: -52, delay: 360, scale: 0.82 },
-    { symbol: "&#x2665;", dx: 2, dy: -62, delay: 520, scale: 0.72 }
-  ],
-  normal: [
-    { symbol: "&#x1F495;", dx: -24, dy: -48, delay: 80, scale: 0.92 },
-    { symbol: "&#x1F497;", dx: 24, dy: -60, delay: 170, scale: 1 },
-    { symbol: "&#x2665;", dx: -8, dy: -70, delay: 280, scale: 0.82 },
-    { symbol: "&#x1F495;", dx: 36, dy: -38, delay: 380, scale: 0.78 },
-    { symbol: "&#x1F497;", dx: -36, dy: -34, delay: 460, scale: 0.84 }
-  ],
-  rough: [
-    { symbol: "&#x1F495;", dx: -34, dy: -48, delay: 40, scale: 1.04 },
-    { symbol: "&#x2728;", dx: 34, dy: -60, delay: 90, scale: 0.96 },
-    { symbol: "&#x1F497;", dx: -14, dy: -74, delay: 150, scale: 1.08 },
-    { symbol: "&#x1F4A2;", dx: 46, dy: -38, delay: 220, scale: 0.92 },
-    { symbol: "&#x2665;", dx: -48, dy: -34, delay: 270, scale: 0.9 },
-    { symbol: "&#x1F495;", dx: 8, dy: -86, delay: 330, scale: 0.82 },
-    { symbol: "&#x2728;", dx: 56, dy: -74, delay: 410, scale: 0.72 },
-    { symbol: "&#x1F497;", dx: -58, dy: -66, delay: 470, scale: 0.76 }
-  ]
-};
-
 const EFFECT_DURATION_BY_INTENSITY = {
   gentle: 1400,
-  normal: 1100,
-  rough: 900
+  normal: 1200,
+  rough: 1300
+};
+
+const PARTICLE_CONFIG_BY_INTENSITY = {
+  gentle: {
+    count: [3, 5],
+    symbols: ["&#x1F497;", "&#x1F33C;", "&#x2728;"],
+    drift: 32,
+    rise: [42, 74],
+    delay: [130, 620],
+    size: [14, 20]
+  },
+  normal: {
+    count: [5, 8],
+    symbols: ["&#x1F495;", "&#x1F497;", "&#x1F33C;", "&#x2728;"],
+    drift: 46,
+    rise: [48, 88],
+    delay: [70, 560],
+    size: [15, 23]
+  },
+  rough: {
+    count: [8, 12],
+    symbols: ["&#x1F495;", "&#x1F497;", "&#x1F33C;", "&#x2728;", "&#x1F4AB;"],
+    drift: 64,
+    rise: [54, 104],
+    delay: [20, 620],
+    size: [16, 26]
+  }
+};
+
+const RUB_ARCS_BY_INTENSITY = {
+  gentle: 0,
+  normal: 1,
+  rough: 3
+};
+
+const TOKEN_FEEDBACK_BY_INTENSITY = {
+  gentle: { cycles: 2, scaleX: 0.018, scaleY: 0.032, shiftX: 0.4, shiftY: 2.2, rotation: 0 },
+  normal: { cycles: 3, scaleX: 0.028, scaleY: 0.045, shiftX: 1.8, shiftY: 3.4, rotation: 0.01 },
+  rough: { cycles: 5, scaleX: 0.04, scaleY: 0.058, shiftX: 3.2, shiftY: 4.6, rotation: 0.018 }
 };
 
 const cooldowns = new Map();
+const tokenFeedbackCleanups = new WeakMap();
 
 Hooks.once("init", () => {
   registerSettings();
@@ -208,13 +224,25 @@ function openPatIntensityDialog(token) {
   }
 
   const defaultIntensity = normalizeIntensity(getSetting("animationIntensity"));
+  const defaultMessage = getDefaultPatMessage();
   const content = `
-    <div class="pat-pat-party-dialog">
+    <form class="pat-pat-party-dialog pat-pat-party-pat-form">
       <p class="pat-pat-party-dialog-target">
         <strong>${escapeHtml(localize("PATPAT.Dialogs.Pat.Target"))}</strong>
         <span>${escapeHtml(getTokenName(liveToken))}</span>
       </p>
-    </div>
+      <div class="form-group">
+        <label for="pat-pat-party-message">${escapeHtml(localize("PATPAT.Dialogs.Pat.MessageLabel"))}</label>
+        <input
+          id="pat-pat-party-message"
+          type="text"
+          name="message"
+          maxlength="${MAX_MESSAGE_LENGTH}"
+          value="${escapeHtml(defaultMessage)}"
+          placeholder="${escapeHtml(localize("PATPAT.Dialogs.Pat.MessagePlaceholder"))}">
+      </div>
+      <p class="notes">${escapeHtml(format("PATPAT.Dialogs.Pat.MessageHint", { max: MAX_MESSAGE_LENGTH }))}</p>
+    </form>
   `;
 
   new Dialog({
@@ -224,17 +252,17 @@ function openPatIntensityDialog(token) {
       gentle: {
         icon: '<i class="fa-solid fa-feather-pointed"></i>',
         label: localize("PATPAT.Intensity.Gentle"),
-        callback: () => runPatFromDialog(liveToken, "gentle")
+        callback: (html) => runPatFromDialog(liveToken, "gentle", readPatMessageFromDialog(html))
       },
       normal: {
         icon: '<i class="fa-solid fa-hand-sparkles"></i>',
         label: localize("PATPAT.Intensity.Normal"),
-        callback: () => runPatFromDialog(liveToken, "normal")
+        callback: (html) => runPatFromDialog(liveToken, "normal", readPatMessageFromDialog(html))
       },
       rough: {
         icon: '<i class="fa-solid fa-wand-sparkles"></i>',
         label: localize("PATPAT.Intensity.Rough"),
-        callback: () => runPatFromDialog(liveToken, "rough")
+        callback: (html) => runPatFromDialog(liveToken, "rough", readPatMessageFromDialog(html))
       },
       cancel: {
         icon: '<i class="fa-solid fa-xmark"></i>',
@@ -245,9 +273,9 @@ function openPatIntensityDialog(token) {
   }).render(true);
 }
 
-function runPatFromDialog(token, intensity) {
+function runPatFromDialog(token, intensity, message) {
   const liveToken = resolveLiveToken(token) ?? token;
-  return handlePatToken(liveToken, intensity).catch((error) => {
+  return handlePatToken(liveToken, intensity, message).catch((error) => {
     warn("Failed to handle token pat.", error);
     ui.notifications?.warn(localize("PATPAT.Warnings.Generic"));
   });
@@ -310,7 +338,7 @@ function openCalibrationDialog(token) {
   }).render(true);
 }
 
-async function handlePatToken(token, intensity = getSetting("animationIntensity")) {
+async function handlePatToken(token, intensity = getSetting("animationIntensity"), message = getDefaultPatMessage()) {
   const liveToken = resolveLiveToken(token) ?? token;
   if (!liveToken) {
     ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
@@ -330,9 +358,10 @@ async function handlePatToken(token, intensity = getSetting("animationIntensity"
   }
 
   const selectedIntensity = normalizeIntensity(intensity);
-  const payload = createPatPayload(liveToken, selectedIntensity);
+  const safeMessage = normalizePatMessage(message);
+  const payload = createPatPayload(liveToken, selectedIntensity, safeMessage);
 
-  playPatAnimation(liveToken, selectedIntensity);
+  playPatAnimation(liveToken, selectedIntensity, safeMessage, payload.offset);
 
   if (getSetting("showChatMessage")) {
     await sendPatChatMessage(liveToken, payload);
@@ -395,10 +424,10 @@ function checkCooldown(token) {
   return { allowed: true, remaining: 0 };
 }
 
-function playPatAnimation(token, intensity = getSetting("animationIntensity")) {
+function playPatAnimation(token, intensity = getSetting("animationIntensity"), message = getDefaultPatMessage(), offsetOverride = null) {
   if (!token || !canvas?.ready) return;
 
-  const position = getTokenScreenPosition(token);
+  const position = getTokenScreenPosition(token, offsetOverride);
   if (!position) {
     warn("Unable to determine token screen position for animation.", token);
     return;
@@ -408,27 +437,31 @@ function playPatAnimation(token, intensity = getSetting("animationIntensity")) {
   if (!overlay) return;
 
   const selectedIntensity = normalizeIntensity(intensity);
+  const duration = EFFECT_DURATION_BY_INTENSITY[selectedIntensity];
+  const safeMessage = normalizePatMessage(message);
   const effect = document.createElement("div");
   effect.className = `pat-pat-party-effect pat-pat-party-intensity-${selectedIntensity}`;
   effect.style.left = `${Math.round(position.x)}px`;
   effect.style.top = `${Math.round(position.y)}px`;
-  effect.style.setProperty("--ppp-duration", `${EFFECT_DURATION_BY_INTENSITY[selectedIntensity]}ms`);
+  effect.style.setProperty("--ppp-duration", `${duration}ms`);
   effect.innerHTML = `
+    <div class="pat-pat-party-token-feedback" aria-hidden="true"></div>
+    <div class="pat-pat-party-rub-arcs" aria-hidden="true">${createRubArcMarkup(selectedIntensity)}</div>
     <div class="pat-pat-party-hand" aria-hidden="true">&#x1F590;&#xFE0F;</div>
-    <div class="pat-pat-party-hearts" aria-hidden="true">
-      ${createHeartMarkup(selectedIntensity)}
-    </div>
+    <div class="pat-pat-party-particles" aria-hidden="true">${createParticleMarkup(selectedIntensity)}</div>
+    <div class="pat-pat-party-floating-text">${escapeHtml(safeMessage)}</div>
   `;
 
   overlay.appendChild(effect);
-  window.setTimeout(() => effect.remove(), EFFECT_DURATION_BY_INTENSITY[selectedIntensity] + 450);
+  playTokenSpriteFeedback(token, selectedIntensity, duration);
+  window.setTimeout(() => effect.remove(), duration + 650);
 }
 
 async function sendPatChatMessage(token, payload) {
   if (!token) return;
 
   const speakerToken = getSpeakerToken(token);
-  const message = localize(payload.messageKey ?? "PATPAT.Chat.Message");
+  const message = normalizePatMessage(payload.message ?? localize(payload.messageKey ?? "PATPAT.Chat.Message"));
   const speaker = getChatSpeaker(speakerToken);
   const content = `
     <div class="pat-pat-party-chat-card">
@@ -485,7 +518,7 @@ function handleSocketPat(payload) {
     return;
   }
 
-  playPatAnimation(token, payload.intensity);
+  playPatAnimation(token, payload.intensity, payload.message, payload.offset);
 }
 
 async function handleSocketSetPatOffset(payload) {
@@ -556,7 +589,7 @@ async function savePatOffset(token, offset) {
   }
 }
 
-function createPatPayload(token, intensity) {
+function createPatPayload(token, intensity, message = getDefaultPatMessage()) {
   return {
     action: "pat",
     sceneId: canvas?.scene?.id,
@@ -565,7 +598,9 @@ function createPatPayload(token, intensity) {
     userName: game.user?.name,
     targetName: getTokenName(token),
     messageKey: "PATPAT.Chat.Message",
-    intensity: normalizeIntensity(intensity)
+    message: normalizePatMessage(message),
+    intensity: normalizeIntensity(intensity),
+    offset: getPatOffset(token)
   };
 }
 
@@ -591,6 +626,14 @@ function readOffsetFromDialog(html) {
     x: formData.get("x"),
     y: formData.get("y")
   });
+}
+
+function readPatMessageFromDialog(html) {
+  const form = getDialogForm(html);
+  if (!form) return getDefaultPatMessage();
+
+  const formData = new FormData(form);
+  return normalizePatMessage(formData.get("message"));
 }
 
 function getTokenFromHud(app, data) {
@@ -689,11 +732,11 @@ function canRequesterCalibrateToken(user, tokenDocument) {
   return false;
 }
 
-function getTokenScreenPosition(token) {
+function getTokenScreenPosition(token, offsetOverride = null) {
   const basePosition = getTokenTopCenterScreenPosition(token);
   if (!basePosition) return null;
 
-  const offset = getPatOffset(token);
+  const offset = offsetOverride ? normalizeOffset(offsetOverride) : getPatOffset(token);
   return {
     x: basePosition.x + offset.x,
     y: basePosition.y + offset.y
@@ -772,20 +815,151 @@ function clampOffset(value) {
   return Math.min(300, Math.max(-300, Math.round(number)));
 }
 
-function createHeartMarkup(intensity) {
-  const hearts = HEARTS_BY_INTENSITY[normalizeIntensity(intensity)] ?? HEARTS_BY_INTENSITY.normal;
-  return hearts
-    .map((heart) => {
-      const style = [
-        `--ppp-dx: ${heart.dx}px`,
-        `--ppp-dy: ${heart.dy}px`,
-        `--ppp-delay: ${heart.delay}ms`,
-        `--ppp-heart-scale: ${heart.scale}`
-      ].join("; ");
+function createParticleMarkup(intensity) {
+  const selectedIntensity = normalizeIntensity(intensity);
+  const config = PARTICLE_CONFIG_BY_INTENSITY[selectedIntensity] ?? PARTICLE_CONFIG_BY_INTENSITY.normal;
+  const particleCount = randomInt(config.count[0], config.count[1]);
 
-      return `<span class="pat-pat-party-heart" style="${style};">${heart.symbol}</span>`;
-    })
-    .join("");
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const driftX = side * randomBetween(config.drift * 0.25, config.drift);
+    const startX = randomBetween(-20, 20);
+    const rise = randomBetween(config.rise[0], config.rise[1]);
+    const delay = randomInt(config.delay[0], config.delay[1]);
+    const size = randomInt(config.size[0], config.size[1]);
+    const scale = randomBetween(0.8, 1.22);
+    const rotate = randomBetween(-22, 22);
+    const symbol = pick(config.symbols);
+    const style = [
+      `--ppp-start-x: ${startX.toFixed(1)}px`,
+      `--ppp-drift-x: ${driftX.toFixed(1)}px`,
+      `--ppp-rise-y: -${rise.toFixed(1)}px`,
+      `--ppp-delay: ${delay}ms`,
+      `--ppp-particle-size: ${size}px`,
+      `--ppp-particle-scale: ${scale.toFixed(2)}`,
+      `--ppp-rotate: ${rotate.toFixed(1)}deg`
+    ].join("; ");
+
+    return `<span class="pat-pat-party-particle" style="${style};">${symbol}</span>`;
+  }).join("");
+}
+
+function createRubArcMarkup(intensity) {
+  const selectedIntensity = normalizeIntensity(intensity);
+  const arcCount = RUB_ARCS_BY_INTENSITY[selectedIntensity] ?? 0;
+  return Array.from({ length: arcCount }, (_, index) => {
+    const delay = selectedIntensity === "rough" ? 150 + index * 130 : 240;
+    const offset = (index - (arcCount - 1) / 2) * 18;
+    const style = [
+      `--ppp-arc-delay: ${delay}ms`,
+      `--ppp-arc-x: ${offset}px`,
+      `--ppp-arc-rotate: ${index % 2 === 0 ? -14 : 14}deg`
+    ].join("; ");
+
+    return `<span class="pat-pat-party-rub-arc" style="${style};"></span>`;
+  }).join("");
+}
+
+function playTokenSpriteFeedback(token, intensity, duration) {
+  const mesh = getTokenVisualMesh(token);
+  if (!mesh?.scale || !mesh?.position || mesh.destroyed) return;
+
+  const previousCleanup = tokenFeedbackCleanups.get(token);
+  if (previousCleanup) previousCleanup();
+
+  const selectedIntensity = normalizeIntensity(intensity);
+  const config = TOKEN_FEEDBACK_BY_INTENSITY[selectedIntensity] ?? TOKEN_FEEDBACK_BY_INTENSITY.normal;
+  const original = {
+    scaleX: mesh.scale.x,
+    scaleY: mesh.scale.y,
+    x: mesh.position.x,
+    y: mesh.position.y,
+    rotation: Number(mesh.rotation) || 0
+  };
+
+  let frameId = null;
+  let active = true;
+  const startedAt = performance.now();
+
+  const restore = () => {
+    if (mesh.destroyed) return;
+    mesh.scale.x = original.scaleX;
+    mesh.scale.y = original.scaleY;
+    mesh.position.x = original.x;
+    mesh.position.y = original.y;
+    mesh.rotation = original.rotation;
+  };
+
+  const cleanup = () => {
+    if (!active) return;
+    active = false;
+    if (frameId) window.cancelAnimationFrame(frameId);
+    restore();
+    tokenFeedbackCleanups.delete(token);
+  };
+
+  tokenFeedbackCleanups.set(token, cleanup);
+
+  const animate = (now) => {
+    if (!active || mesh.destroyed) {
+      cleanup();
+      return;
+    }
+
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const envelope = Math.sin(progress * Math.PI);
+    const wave = Math.sin(progress * Math.PI * config.cycles);
+    const press = Math.abs(wave) * envelope;
+
+    mesh.scale.x = original.scaleX * (1 + config.scaleX * press);
+    mesh.scale.y = original.scaleY * (1 - config.scaleY * press);
+    mesh.position.x = original.x + config.shiftX * wave * envelope;
+    mesh.position.y = original.y + config.shiftY * press;
+    mesh.rotation = original.rotation + config.rotation * wave * envelope;
+
+    if (progress < 1) {
+      frameId = window.requestAnimationFrame(animate);
+    } else {
+      cleanup();
+    }
+  };
+
+  frameId = window.requestAnimationFrame(animate);
+  window.setTimeout(cleanup, duration + 250);
+}
+
+function getTokenVisualMesh(token) {
+  return token?.mesh ?? token?.sprite ?? token?.icon ?? null;
+}
+
+function getDefaultPatMessage() {
+  return truncateText(localize("PATPAT.Chat.Message"), MAX_MESSAGE_LENGTH);
+}
+
+function normalizePatMessage(value) {
+  const normalized = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return getDefaultPatMessage();
+  return truncateText(normalized, MAX_MESSAGE_LENGTH);
+}
+
+function truncateText(value, maxLength) {
+  return Array.from(String(value ?? "")).slice(0, maxLength).join("");
+}
+
+function randomInt(min, max) {
+  return Math.floor(randomBetween(min, max + 1));
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function pick(values) {
+  if (!Array.isArray(values) || values.length === 0) return "";
+  return values[Math.floor(Math.random() * values.length)];
 }
 
 function ensureOverlay() {
