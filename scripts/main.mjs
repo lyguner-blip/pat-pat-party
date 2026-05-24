@@ -2,8 +2,10 @@ const MODULE_ID = "pat-pat-party";
 const MODULE_TITLE = "Pat Pat Party";
 const SOCKET_NAME = `module.${MODULE_ID}`;
 const LOG_PREFIX = "[Pat Pat Party]";
+const HUD_INTERACT_BUTTON_CLASS = "pat-pat-party-interact-hud-button";
 const HUD_PAT_BUTTON_CLASS = "pat-pat-party-hud-button";
 const HUD_HUG_BUTTON_CLASS = "pat-pat-party-hug-hud-button";
+const HUD_FLOWER_BUTTON_CLASS = "pat-pat-party-flower-hud-button";
 const HUD_CALIBRATE_BUTTON_CLASS = "pat-pat-party-calibrate-hud-button";
 const OVERLAY_ID = "pat-pat-party-overlay";
 const PAT_OFFSET_FLAG = "patOffset";
@@ -11,6 +13,9 @@ const MAX_MESSAGE_LENGTH = 40;
 const HAND_SYMBOL = "\u{1F590}\uFE0F";
 const HUG_SYMBOL = "\u{1F917}";
 const HUG_HEART_SYMBOL = "\u{1F49E}";
+const FLOWER_SYMBOL = "\u{1F490}";
+const TEA_SYMBOL = "\u{1F375}";
+const FIST_SYMBOL = "\u{1F44A}";
 
 const INTENSITIES = ["gentle", "normal", "rough"];
 const LEGACY_INTENSITY_MAP = {
@@ -123,6 +128,36 @@ const HUG_PARTICLE_CONFIG = {
   size: [15, 26]
 };
 
+const FLOWER_EFFECT_DURATION = 1350;
+const FLOWER_PARTICLE_CONFIG = {
+  count: [8, 13],
+  symbols: ["\u{1F33C}", "\u{1F337}", "\u{1F338}", "\u{1F497}", "\u2728"],
+  drift: 54,
+  rise: [42, 92],
+  delay: [70, 680],
+  size: [14, 25]
+};
+
+const TEA_EFFECT_DURATION = 1300;
+const TEA_PARTICLE_CONFIG = {
+  count: [6, 10],
+  symbols: ["\u2668\uFE0F", "\u2728", "\u{1F33F}", "\u{1F49A}"],
+  drift: 42,
+  rise: [46, 86],
+  delay: [80, 620],
+  size: [13, 22]
+};
+
+const FIST_BUMP_EFFECT_DURATION = 1150;
+const FIST_BUMP_PARTICLE_CONFIG = {
+  count: [9, 14],
+  symbols: ["\u2728", "\u{1F4AB}", "\u{1F49B}", "\u2B50"],
+  drift: 72,
+  rise: [38, 86],
+  delay: [260, 760],
+  size: [15, 26]
+};
+
 const cooldowns = new Map();
 const tokenFeedbackCleanups = new WeakMap();
 
@@ -138,11 +173,21 @@ Hooks.once("ready", () => {
   game.patPatParty = {
     handlePatToken,
     handleHugToken,
+    handleFlowerToken,
+    handleTeaToken,
+    handleFistBumpToken,
+    openInteractionDialog,
     openPatIntensityDialog,
     openHugDialog,
+    openFlowerDialog,
+    openTeaDialog,
+    openFistBumpDialog,
     openCalibrationDialog,
     playPatAnimation,
     playHugAnimation,
+    playFlowerAnimation,
+    playTeaAnimation,
+    playFistBumpAnimation,
     canPatToken,
     getPatOffset,
     savePatOffset,
@@ -227,26 +272,15 @@ function injectTokenHudButton(app, html, data) {
     root.querySelector(".control-icons") ??
     root;
 
-  if (!root.querySelector(`.${HUD_PAT_BUTTON_CLASS}`)) {
-    const patButton = createHudButton({
-      className: HUD_PAT_BUTTON_CLASS,
-      iconClass: "fa-solid fa-hand-sparkles",
-      labelKey: "PATPAT.Controls.Pat",
-      action: () => openPatIntensityDialog(resolveLiveToken(token) ?? token)
+  if (!root.querySelector(`.${HUD_INTERACT_BUTTON_CLASS}`)) {
+    const interactButton = createHudButton({
+      className: HUD_INTERACT_BUTTON_CLASS,
+      iconClass: "fa-solid fa-hand-holding-heart",
+      labelKey: "PATPAT.Controls.Interact",
+      action: () => openInteractionDialog(resolveLiveToken(token) ?? token)
     });
 
-    targetColumn.appendChild(patButton);
-  }
-
-  if (!root.querySelector(`.${HUD_HUG_BUTTON_CLASS}`)) {
-    const hugButton = createHudButton({
-      className: HUD_HUG_BUTTON_CLASS,
-      iconClass: "fa-solid fa-heart",
-      labelKey: "PATPAT.Controls.Hug",
-      action: () => openHugDialog(resolveLiveToken(token) ?? token)
-    });
-
-    targetColumn.appendChild(hugButton);
+    targetColumn.appendChild(interactButton);
   }
 
   if (!root.querySelector(`.${HUD_CALIBRATE_BUTTON_CLASS}`)) {
@@ -284,6 +318,74 @@ function createHudButton({ className, iconClass, labelKey, action }) {
   });
 
   return button;
+}
+
+function openInteractionDialog(sourceToken) {
+  const liveSource = resolveLiveToken(sourceToken) ?? sourceToken;
+  if (!liveSource) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const targetToken = getInteractionTargetToken(liveSource);
+  if (!targetToken) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const sourceId = liveSource?.id ?? liveSource?.document?.id;
+  const targetId = targetToken?.id ?? targetToken?.document?.id;
+  const isTargetedOther = Boolean(targetId && sourceId && targetId !== sourceId);
+  const content = `
+    <form class="pat-pat-party-dialog pat-pat-party-interaction-form">
+      <p class="pat-pat-party-dialog-target">
+        <strong>${escapeHtml(localize("PATPAT.Dialogs.Interaction.Source"))}</strong>
+        <span>${escapeHtml(getTokenName(liveSource))}</span>
+      </p>
+      <p class="pat-pat-party-dialog-target">
+        <strong>${escapeHtml(localize("PATPAT.Dialogs.Interaction.Target"))}</strong>
+        <span>${escapeHtml(getTokenName(targetToken))}</span>
+      </p>
+      <p class="notes">${escapeHtml(localize(isTargetedOther ? "PATPAT.Dialogs.Interaction.TargetedHint" : "PATPAT.Dialogs.Interaction.SelfHint"))}</p>
+    </form>
+  `;
+
+  new Dialog({
+    title: localize("PATPAT.Dialogs.Interaction.Title"),
+    content,
+    buttons: {
+      pat: {
+        icon: '<i class="fa-solid fa-hand-sparkles"></i>',
+        label: localize("PATPAT.Controls.Pat"),
+        callback: () => openPatIntensityDialog(targetToken)
+      },
+      hug: {
+        icon: '<i class="fa-solid fa-heart"></i>',
+        label: localize("PATPAT.Controls.Hug"),
+        callback: () => openHugDialog(targetToken, liveSource)
+      },
+      fistBump: {
+        icon: '<i class="fa-solid fa-hand-fist"></i>',
+        label: localize("PATPAT.Controls.FistBump"),
+        callback: () => openFistBumpDialog(targetToken, liveSource)
+      },
+      flower: {
+        icon: '<i class="fa-solid fa-seedling"></i>',
+        label: localize("PATPAT.Controls.Flower"),
+        callback: () => openFlowerDialog(targetToken)
+      },
+      tea: {
+        icon: '<i class="fa-solid fa-mug-hot"></i>',
+        label: localize("PATPAT.Controls.Tea"),
+        callback: () => openTeaDialog(targetToken)
+      },
+      cancel: {
+        icon: '<i class="fa-solid fa-xmark"></i>',
+        label: localize("PATPAT.Dialogs.Common.Cancel")
+      }
+    },
+    default: "pat"
+  }).render(true);
 }
 
 function openPatIntensityDialog(token) {
@@ -351,14 +453,14 @@ function runPatFromDialog(token, intensity, message) {
   });
 }
 
-function openHugDialog(targetToken) {
+function openHugDialog(targetToken, sourceOverride = null) {
   const liveTarget = resolveLiveToken(targetToken) ?? targetToken;
   if (!liveTarget) {
     ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
     return;
   }
 
-  const sourceToken = getHugSourceToken(liveTarget);
+  const sourceToken = getHugSourceToken(liveTarget, sourceOverride);
   if (!sourceToken) {
     ui.notifications?.warn(localize("PATPAT.Warnings.NoHugSource"));
     return;
@@ -405,6 +507,179 @@ function openHugDialog(targetToken) {
     },
     default: "hug"
   }).render(true);
+}
+
+function openFlowerDialog(token) {
+  const liveToken = resolveLiveToken(token) ?? token;
+  if (!liveToken) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const defaultMessage = getDefaultFlowerMessage();
+  const content = `
+    <form class="pat-pat-party-dialog pat-pat-party-flower-form">
+      <p class="pat-pat-party-dialog-target">
+        <strong>${escapeHtml(localize("PATPAT.Dialogs.Flower.Target"))}</strong>
+        <span>${escapeHtml(getTokenName(liveToken))}</span>
+      </p>
+      <div class="form-group">
+        <label for="pat-pat-party-flower-message">${escapeHtml(localize("PATPAT.Dialogs.Flower.MessageLabel"))}</label>
+        <input
+          id="pat-pat-party-flower-message"
+          type="text"
+          name="message"
+          maxlength="${MAX_MESSAGE_LENGTH}"
+          value="${escapeHtml(defaultMessage)}"
+          placeholder="${escapeHtml(localize("PATPAT.Dialogs.Flower.MessagePlaceholder"))}">
+      </div>
+      <p class="notes">${escapeHtml(format("PATPAT.Dialogs.Flower.MessageHint", { max: MAX_MESSAGE_LENGTH }))}</p>
+    </form>
+  `;
+
+  new Dialog({
+    title: localize("PATPAT.Dialogs.Flower.Title"),
+    content,
+    buttons: {
+      flower: {
+        icon: '<i class="fa-solid fa-seedling"></i>',
+        label: localize("PATPAT.Dialogs.Flower.Action"),
+        callback: (html) => runFlowerFromDialog(liveToken, readFlowerMessageFromDialog(html))
+      },
+      cancel: {
+        icon: '<i class="fa-solid fa-xmark"></i>',
+        label: localize("PATPAT.Dialogs.Common.Cancel")
+      }
+    },
+    default: "flower"
+  }).render(true);
+}
+
+function openTeaDialog(token) {
+  const liveToken = resolveLiveToken(token) ?? token;
+  if (!liveToken) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const defaultMessage = getDefaultTeaMessage();
+  const content = `
+    <form class="pat-pat-party-dialog pat-pat-party-tea-form">
+      <p class="pat-pat-party-dialog-target">
+        <strong>${escapeHtml(localize("PATPAT.Dialogs.Tea.Target"))}</strong>
+        <span>${escapeHtml(getTokenName(liveToken))}</span>
+      </p>
+      <div class="form-group">
+        <label for="pat-pat-party-tea-message">${escapeHtml(localize("PATPAT.Dialogs.Tea.MessageLabel"))}</label>
+        <input
+          id="pat-pat-party-tea-message"
+          type="text"
+          name="message"
+          maxlength="${MAX_MESSAGE_LENGTH}"
+          value="${escapeHtml(defaultMessage)}"
+          placeholder="${escapeHtml(localize("PATPAT.Dialogs.Tea.MessagePlaceholder"))}">
+      </div>
+      <p class="notes">${escapeHtml(format("PATPAT.Dialogs.Tea.MessageHint", { max: MAX_MESSAGE_LENGTH }))}</p>
+    </form>
+  `;
+
+  new Dialog({
+    title: localize("PATPAT.Dialogs.Tea.Title"),
+    content,
+    buttons: {
+      tea: {
+        icon: '<i class="fa-solid fa-mug-hot"></i>',
+        label: localize("PATPAT.Dialogs.Tea.Action"),
+        callback: (html) => runTeaFromDialog(liveToken, readTeaMessageFromDialog(html))
+      },
+      cancel: {
+        icon: '<i class="fa-solid fa-xmark"></i>',
+        label: localize("PATPAT.Dialogs.Common.Cancel")
+      }
+    },
+    default: "tea"
+  }).render(true);
+}
+
+function openFistBumpDialog(targetToken, sourceOverride = null) {
+  const liveTarget = resolveLiveToken(targetToken) ?? targetToken;
+  if (!liveTarget) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const sourceToken = getHugSourceToken(liveTarget, sourceOverride);
+  if (!sourceToken) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoHugSource"));
+    return;
+  }
+
+  const defaultMessage = getDefaultFistBumpMessage();
+  const content = `
+    <form class="pat-pat-party-dialog pat-pat-party-fist-bump-form">
+      <p class="pat-pat-party-dialog-target">
+        <strong>${escapeHtml(localize("PATPAT.Dialogs.FistBump.Source"))}</strong>
+        <span>${escapeHtml(getTokenName(sourceToken))}</span>
+      </p>
+      <p class="pat-pat-party-dialog-target">
+        <strong>${escapeHtml(localize("PATPAT.Dialogs.FistBump.Target"))}</strong>
+        <span>${escapeHtml(getTokenName(liveTarget))}</span>
+      </p>
+      <div class="form-group">
+        <label for="pat-pat-party-fist-bump-message">${escapeHtml(localize("PATPAT.Dialogs.FistBump.MessageLabel"))}</label>
+        <input
+          id="pat-pat-party-fist-bump-message"
+          type="text"
+          name="message"
+          maxlength="${MAX_MESSAGE_LENGTH}"
+          value="${escapeHtml(defaultMessage)}"
+          placeholder="${escapeHtml(localize("PATPAT.Dialogs.FistBump.MessagePlaceholder"))}">
+      </div>
+      <p class="notes">${escapeHtml(format("PATPAT.Dialogs.FistBump.MessageHint", { max: MAX_MESSAGE_LENGTH }))}</p>
+    </form>
+  `;
+
+  new Dialog({
+    title: localize("PATPAT.Dialogs.FistBump.Title"),
+    content,
+    buttons: {
+      fistBump: {
+        icon: '<i class="fa-solid fa-hand-fist"></i>',
+        label: localize("PATPAT.Dialogs.FistBump.Action"),
+        callback: (html) => runFistBumpFromDialog(sourceToken, liveTarget, readFistBumpMessageFromDialog(html))
+      },
+      cancel: {
+        icon: '<i class="fa-solid fa-xmark"></i>',
+        label: localize("PATPAT.Dialogs.Common.Cancel")
+      }
+    },
+    default: "fistBump"
+  }).render(true);
+}
+
+function runFistBumpFromDialog(sourceToken, targetToken, message) {
+  const liveSource = resolveLiveToken(sourceToken) ?? sourceToken;
+  const liveTarget = resolveLiveToken(targetToken) ?? targetToken;
+  return handleFistBumpToken(liveSource, liveTarget, message).catch((error) => {
+    warn("Failed to handle token fist bump.", error);
+    ui.notifications?.warn(localize("PATPAT.Warnings.Generic"));
+  });
+}
+
+function runTeaFromDialog(token, message) {
+  const liveToken = resolveLiveToken(token) ?? token;
+  return handleTeaToken(liveToken, message).catch((error) => {
+    warn("Failed to handle token tea.", error);
+    ui.notifications?.warn(localize("PATPAT.Warnings.Generic"));
+  });
+}
+
+function runFlowerFromDialog(token, message) {
+  const liveToken = resolveLiveToken(token) ?? token;
+  return handleFlowerToken(liveToken, message).catch((error) => {
+    warn("Failed to handle token flower.", error);
+    ui.notifications?.warn(localize("PATPAT.Warnings.Generic"));
+  });
 }
 
 function runHugFromDialog(sourceToken, targetToken, message) {
@@ -535,6 +810,100 @@ async function handleHugToken(sourceToken, targetToken, message = getDefaultHugM
   }
 
   broadcastHug(payload);
+}
+
+async function handleFlowerToken(token, message = getDefaultFlowerMessage()) {
+  const liveToken = resolveLiveToken(token) ?? token;
+  if (!liveToken) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const permission = canPatToken(liveToken);
+  if (!permission.allowed) {
+    ui.notifications?.warn(localize(permission.messageKey));
+    return;
+  }
+
+  const cooldown = checkCooldown(liveToken, "flower");
+  if (!cooldown.allowed) {
+    ui.notifications?.warn(format("PATPAT.Warnings.Cooldown", { seconds: cooldown.remaining }));
+    return;
+  }
+
+  const safeMessage = normalizeFlowerMessage(message);
+  const payload = createFlowerPayload(liveToken, safeMessage);
+
+  playFlowerAnimation(liveToken, safeMessage, payload.offset);
+
+  if (getSetting("showChatMessage")) {
+    await sendFlowerChatMessage(liveToken, payload);
+  }
+
+  broadcastFlower(payload);
+}
+
+async function handleTeaToken(token, message = getDefaultTeaMessage()) {
+  const liveToken = resolveLiveToken(token) ?? token;
+  if (!liveToken) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const permission = canPatToken(liveToken);
+  if (!permission.allowed) {
+    ui.notifications?.warn(localize(permission.messageKey));
+    return;
+  }
+
+  const cooldown = checkCooldown(liveToken, "tea");
+  if (!cooldown.allowed) {
+    ui.notifications?.warn(format("PATPAT.Warnings.Cooldown", { seconds: cooldown.remaining }));
+    return;
+  }
+
+  const safeMessage = normalizeTeaMessage(message);
+  const payload = createTeaPayload(liveToken, safeMessage);
+
+  playTeaAnimation(liveToken, safeMessage, payload.offset);
+
+  if (getSetting("showChatMessage")) {
+    await sendTeaChatMessage(liveToken, payload);
+  }
+
+  broadcastTea(payload);
+}
+
+async function handleFistBumpToken(sourceToken, targetToken, message = getDefaultFistBumpMessage()) {
+  const liveSource = resolveLiveToken(sourceToken) ?? sourceToken;
+  const liveTarget = resolveLiveToken(targetToken) ?? targetToken;
+  if (!liveSource || !liveTarget) {
+    ui.notifications?.warn(localize("PATPAT.Warnings.NoToken"));
+    return;
+  }
+
+  const permission = canHugToken(liveSource, liveTarget);
+  if (!permission.allowed) {
+    ui.notifications?.warn(localize(permission.messageKey));
+    return;
+  }
+
+  const cooldown = checkCooldown(liveTarget, "fistBump");
+  if (!cooldown.allowed) {
+    ui.notifications?.warn(format("PATPAT.Warnings.Cooldown", { seconds: cooldown.remaining }));
+    return;
+  }
+
+  const safeMessage = normalizeFistBumpMessage(message);
+  const payload = createFistBumpPayload(liveSource, liveTarget, safeMessage);
+
+  playFistBumpAnimation(liveSource, liveTarget, safeMessage);
+
+  if (getSetting("showChatMessage")) {
+    await sendFistBumpChatMessage(liveSource, liveTarget, payload);
+  }
+
+  broadcastFistBump(payload);
 }
 
 function canPatToken(token) {
@@ -817,6 +1186,301 @@ function playDomHugAnimation(sourceToken, targetToken, message) {
   window.setTimeout(() => effect.remove(), HUG_EFFECT_DURATION + 650);
 }
 
+function playFlowerAnimation(token, message = getDefaultFlowerMessage(), offsetOverride = null) {
+  if (!token || !canvas?.ready) return;
+
+  const safeMessage = normalizeFlowerMessage(message);
+  if (playPixiFlowerAnimation(token, safeMessage, offsetOverride)) {
+    return;
+  }
+
+  playDomFlowerAnimation(token, safeMessage, offsetOverride);
+}
+
+function playPixiFlowerAnimation(token, message, offsetOverride = null) {
+  const PIXIConstructor = globalThis.PIXI;
+  const parent = getPixiEffectParent();
+  const ticker = canvas?.app?.ticker;
+
+  if (!PIXIConstructor || !parent?.addChild || !ticker) return false;
+
+  const position = getTokenTopCenterWorldPosition(token, offsetOverride);
+  if (!position) {
+    warn("Unable to determine token world position for PIXI flower animation.", token);
+    return false;
+  }
+
+  let cleanupEffect = null;
+
+  try {
+    const effect = createPixiFlowerEffect(PIXIConstructor, message);
+    const tokenFeedback = createTokenFeedbackAnimator(token, "gentle");
+    const startedAt = performance.now();
+    let cleaned = false;
+
+    effect.position.set(position.x, position.y);
+    effect.scale.set(getInverseCanvasScale());
+    parent.addChild(effect);
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      ticker.remove(tick, effect);
+      tokenFeedback?.cleanup();
+      if (effect.parent) effect.parent.removeChild(effect);
+      if (!effect.destroyed) effect.destroy({ children: true });
+    };
+    cleanupEffect = cleanup;
+
+    const tick = () => {
+      const elapsed = performance.now() - startedAt;
+      const progress = Math.min(1, elapsed / FLOWER_EFFECT_DURATION);
+      const nextPosition = getTokenTopCenterWorldPosition(token, offsetOverride);
+      if (nextPosition) effect.position.set(nextPosition.x, nextPosition.y);
+      effect.scale.set(getInverseCanvasScale());
+
+      updatePixiFlowerEffect(effect, elapsed, progress);
+      tokenFeedback?.update(progress);
+
+      if (progress >= 1) cleanup();
+    };
+
+    ticker.add(tick, effect, PIXIConstructor.UPDATE_PRIORITY?.LOW ?? 0);
+    tick();
+    window.setTimeout(cleanup, FLOWER_EFFECT_DURATION + 900);
+    return true;
+  } catch (error) {
+    cleanupEffect?.();
+    warn("PIXI flower animation failed; using DOM fallback.", error);
+    return false;
+  }
+}
+
+function playDomFlowerAnimation(token, message, offsetOverride = null) {
+  const position = getTokenScreenPosition(token, offsetOverride);
+  if (!position) {
+    warn("Unable to determine token screen position for flower animation.", token);
+    return;
+  }
+
+  const overlay = ensureOverlay();
+  if (!overlay) return;
+
+  const effect = document.createElement("div");
+  effect.className = "pat-pat-party-flower-effect";
+  effect.style.left = `${Math.round(position.x)}px`;
+  effect.style.top = `${Math.round(position.y)}px`;
+  effect.style.setProperty("--ppp-duration", `${FLOWER_EFFECT_DURATION}ms`);
+  effect.innerHTML = `
+    <div class="pat-pat-party-flower-glow" aria-hidden="true"></div>
+    <div class="pat-pat-party-flower-symbol" aria-hidden="true">&#x1F490;</div>
+    <div class="pat-pat-party-flower-particles" aria-hidden="true">${createFlowerParticleMarkup()}</div>
+    <div class="pat-pat-party-floating-text">${escapeHtml(normalizeFlowerMessage(message))}</div>
+  `;
+
+  overlay.appendChild(effect);
+  playTokenSpriteFeedback(token, "gentle", FLOWER_EFFECT_DURATION);
+  window.setTimeout(() => effect.remove(), FLOWER_EFFECT_DURATION + 650);
+}
+
+function playTeaAnimation(token, message = getDefaultTeaMessage(), offsetOverride = null) {
+  if (!token || !canvas?.ready) return;
+
+  const safeMessage = normalizeTeaMessage(message);
+  if (playPixiTeaAnimation(token, safeMessage, offsetOverride)) {
+    return;
+  }
+
+  playDomTeaAnimation(token, safeMessage, offsetOverride);
+}
+
+function playPixiTeaAnimation(token, message, offsetOverride = null) {
+  const PIXIConstructor = globalThis.PIXI;
+  const parent = getPixiEffectParent();
+  const ticker = canvas?.app?.ticker;
+
+  if (!PIXIConstructor || !parent?.addChild || !ticker) return false;
+
+  const position = getTokenTopCenterWorldPosition(token, offsetOverride);
+  if (!position) {
+    warn("Unable to determine token world position for PIXI tea animation.", token);
+    return false;
+  }
+
+  let cleanupEffect = null;
+
+  try {
+    const effect = createPixiTeaEffect(PIXIConstructor, message);
+    const tokenFeedback = createTokenFeedbackAnimator(token, "gentle");
+    const startedAt = performance.now();
+    let cleaned = false;
+
+    effect.position.set(position.x, position.y);
+    effect.scale.set(getInverseCanvasScale());
+    parent.addChild(effect);
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      ticker.remove(tick, effect);
+      tokenFeedback?.cleanup();
+      if (effect.parent) effect.parent.removeChild(effect);
+      if (!effect.destroyed) effect.destroy({ children: true });
+    };
+    cleanupEffect = cleanup;
+
+    const tick = () => {
+      const elapsed = performance.now() - startedAt;
+      const progress = Math.min(1, elapsed / TEA_EFFECT_DURATION);
+      const nextPosition = getTokenTopCenterWorldPosition(token, offsetOverride);
+      if (nextPosition) effect.position.set(nextPosition.x, nextPosition.y);
+      effect.scale.set(getInverseCanvasScale());
+
+      updatePixiTeaEffect(effect, elapsed, progress);
+      tokenFeedback?.update(progress);
+
+      if (progress >= 1) cleanup();
+    };
+
+    ticker.add(tick, effect, PIXIConstructor.UPDATE_PRIORITY?.LOW ?? 0);
+    tick();
+    window.setTimeout(cleanup, TEA_EFFECT_DURATION + 900);
+    return true;
+  } catch (error) {
+    cleanupEffect?.();
+    warn("PIXI tea animation failed; using DOM fallback.", error);
+    return false;
+  }
+}
+
+function playDomTeaAnimation(token, message, offsetOverride = null) {
+  const position = getTokenScreenPosition(token, offsetOverride);
+  if (!position) {
+    warn("Unable to determine token screen position for tea animation.", token);
+    return;
+  }
+
+  const overlay = ensureOverlay();
+  if (!overlay) return;
+
+  const effect = document.createElement("div");
+  effect.className = "pat-pat-party-tea-effect";
+  effect.style.left = `${Math.round(position.x)}px`;
+  effect.style.top = `${Math.round(position.y)}px`;
+  effect.style.setProperty("--ppp-duration", `${TEA_EFFECT_DURATION}ms`);
+  effect.innerHTML = `
+    <div class="pat-pat-party-tea-glow" aria-hidden="true"></div>
+    <div class="pat-pat-party-tea-symbol" aria-hidden="true">&#x1F375;</div>
+    <div class="pat-pat-party-tea-particles" aria-hidden="true">${createTeaParticleMarkup()}</div>
+    <div class="pat-pat-party-floating-text">${escapeHtml(normalizeTeaMessage(message))}</div>
+  `;
+
+  overlay.appendChild(effect);
+  playTokenSpriteFeedback(token, "gentle", TEA_EFFECT_DURATION);
+  window.setTimeout(() => effect.remove(), TEA_EFFECT_DURATION + 650);
+}
+
+function playFistBumpAnimation(sourceToken, targetToken, message = getDefaultFistBumpMessage()) {
+  if (!sourceToken || !targetToken || !canvas?.ready) return;
+
+  const safeMessage = normalizeFistBumpMessage(message);
+  if (playPixiFistBumpAnimation(sourceToken, targetToken, safeMessage)) {
+    return;
+  }
+
+  playDomFistBumpAnimation(sourceToken, targetToken, safeMessage);
+}
+
+function playPixiFistBumpAnimation(sourceToken, targetToken, message) {
+  const PIXIConstructor = globalThis.PIXI;
+  const parent = getPixiEffectParent();
+  const ticker = canvas?.app?.ticker;
+
+  if (!PIXIConstructor || !parent?.addChild || !ticker) return false;
+
+  const endpoints = getHugWorldEndpoints(sourceToken, targetToken);
+  if (!endpoints) {
+    warn("Unable to determine token world positions for PIXI fist bump animation.", { sourceToken, targetToken });
+    return false;
+  }
+
+  let cleanupEffect = null;
+
+  try {
+    const effect = createPixiFistBumpEffect(PIXIConstructor, message);
+    const sourceFeedback = createTokenFeedbackAnimator(sourceToken, "normal");
+    const targetFeedback = createTokenFeedbackAnimator(targetToken, "normal");
+    const startedAt = performance.now();
+    let cleaned = false;
+
+    positionDuoEffect(effect, endpoints);
+    parent.addChild(effect);
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      ticker.remove(tick, effect);
+      sourceFeedback?.cleanup();
+      targetFeedback?.cleanup();
+      if (effect.parent) effect.parent.removeChild(effect);
+      if (!effect.destroyed) effect.destroy({ children: true });
+    };
+    cleanupEffect = cleanup;
+
+    const tick = () => {
+      const elapsed = performance.now() - startedAt;
+      const progress = Math.min(1, elapsed / FIST_BUMP_EFFECT_DURATION);
+      const nextEndpoints = getHugWorldEndpoints(sourceToken, targetToken);
+      if (nextEndpoints) positionDuoEffect(effect, nextEndpoints);
+
+      updatePixiFistBumpEffect(effect, elapsed, progress);
+      sourceFeedback?.update(progress);
+      targetFeedback?.update(progress);
+
+      if (progress >= 1) cleanup();
+    };
+
+    ticker.add(tick, effect, PIXIConstructor.UPDATE_PRIORITY?.LOW ?? 0);
+    tick();
+    window.setTimeout(cleanup, FIST_BUMP_EFFECT_DURATION + 900);
+    return true;
+  } catch (error) {
+    cleanupEffect?.();
+    warn("PIXI fist bump animation failed; using DOM fallback.", error);
+    return false;
+  }
+}
+
+function playDomFistBumpAnimation(sourceToken, targetToken, message) {
+  const endpoints = getHugScreenEndpoints(sourceToken, targetToken);
+  if (!endpoints) {
+    warn("Unable to determine token screen positions for fist bump animation.", { sourceToken, targetToken });
+    return;
+  }
+
+  const overlay = ensureOverlay();
+  if (!overlay) return;
+
+  const midpoint = getMidpoint(endpoints.source, endpoints.target);
+  const effect = document.createElement("div");
+  effect.className = "pat-pat-party-fist-bump-effect";
+  effect.style.left = `${Math.round(midpoint.x)}px`;
+  effect.style.top = `${Math.round(midpoint.y)}px`;
+  effect.style.setProperty("--ppp-duration", `${FIST_BUMP_EFFECT_DURATION}ms`);
+  effect.innerHTML = `
+    <div class="pat-pat-party-fist-bump-burst" aria-hidden="true"></div>
+    <div class="pat-pat-party-fist-bump-left" aria-hidden="true">&#x1F44A;</div>
+    <div class="pat-pat-party-fist-bump-right" aria-hidden="true">&#x1F44A;</div>
+    <div class="pat-pat-party-fist-bump-particles" aria-hidden="true">${createFistBumpParticleMarkup()}</div>
+    <div class="pat-pat-party-floating-text">${escapeHtml(normalizeFistBumpMessage(message))}</div>
+  `;
+
+  overlay.appendChild(effect);
+  playTokenSpriteFeedback(sourceToken, "normal", FIST_BUMP_EFFECT_DURATION);
+  playTokenSpriteFeedback(targetToken, "normal", FIST_BUMP_EFFECT_DURATION);
+  window.setTimeout(() => effect.remove(), FIST_BUMP_EFFECT_DURATION + 650);
+}
+
 async function sendPatChatMessage(token, payload) {
   if (!token) return;
 
@@ -868,6 +1532,81 @@ async function sendHugChatMessage(sourceToken, targetToken, payload) {
   });
 }
 
+async function sendFlowerChatMessage(token, payload) {
+  if (!token) return;
+
+  const speakerToken = getSpeakerToken(token);
+  const message = normalizeFlowerMessage(payload.message ?? localize(payload.messageKey ?? "PATPAT.Flower.Chat.Message"));
+  const speaker = getChatSpeaker(speakerToken);
+  const content = `
+    <div class="pat-pat-party-chat-card pat-pat-party-flower-chat-card">
+      <header class="pat-pat-party-chat-header">
+        <i class="fa-solid fa-seedling" aria-hidden="true"></i>
+        <span>${escapeHtml(localize("PATPAT.Flower.Chat.Title"))}</span>
+      </header>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+
+  await ChatMessage.create({
+    user: game.user?.id,
+    speaker,
+    content,
+    flavor: localize("PATPAT.Flower.Chat.Flavor")
+  });
+}
+
+async function sendTeaChatMessage(token, payload) {
+  if (!token) return;
+
+  const speakerToken = getSpeakerToken(token);
+  const message = normalizeTeaMessage(payload.message ?? localize(payload.messageKey ?? "PATPAT.Tea.Chat.Message"));
+  const speaker = getChatSpeaker(speakerToken);
+  const content = `
+    <div class="pat-pat-party-chat-card pat-pat-party-tea-chat-card">
+      <header class="pat-pat-party-chat-header">
+        <i class="fa-solid fa-mug-hot" aria-hidden="true"></i>
+        <span>${escapeHtml(localize("PATPAT.Tea.Chat.Title"))}</span>
+      </header>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+
+  await ChatMessage.create({
+    user: game.user?.id,
+    speaker,
+    content,
+    flavor: localize("PATPAT.Tea.Chat.Flavor")
+  });
+}
+
+async function sendFistBumpChatMessage(sourceToken, targetToken, payload) {
+  if (!sourceToken || !targetToken) return;
+
+  const message = normalizeFistBumpMessage(payload.message ?? localize(payload.messageKey ?? "PATPAT.FistBump.Chat.Message"));
+  const speaker = getChatSpeaker(sourceToken);
+  const content = `
+    <div class="pat-pat-party-chat-card pat-pat-party-fist-bump-chat-card">
+      <header class="pat-pat-party-chat-header">
+        <i class="fa-solid fa-hand-fist" aria-hidden="true"></i>
+        <span>${escapeHtml(localize("PATPAT.FistBump.Chat.Title"))}</span>
+      </header>
+      <p class="pat-pat-party-chat-line">${escapeHtml(format("PATPAT.FistBump.Chat.Line", {
+        actor: getTokenName(sourceToken),
+        target: getTokenName(targetToken)
+      }))}</p>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+
+  await ChatMessage.create({
+    user: game.user?.id,
+    speaker,
+    content,
+    flavor: localize("PATPAT.FistBump.Chat.Flavor")
+  });
+}
+
 function broadcastPat(payload) {
   if (!game.socket) {
     warn("Socket is unavailable; animation will remain local.");
@@ -894,6 +1633,45 @@ function broadcastHug(payload) {
   }
 }
 
+function broadcastFlower(payload) {
+  if (!game.socket) {
+    warn("Socket is unavailable; flower animation will remain local.");
+    return;
+  }
+
+  try {
+    game.socket.emit(SOCKET_NAME, payload);
+  } catch (error) {
+    warn("Failed to broadcast flower animation.", error);
+  }
+}
+
+function broadcastTea(payload) {
+  if (!game.socket) {
+    warn("Socket is unavailable; tea animation will remain local.");
+    return;
+  }
+
+  try {
+    game.socket.emit(SOCKET_NAME, payload);
+  } catch (error) {
+    warn("Failed to broadcast tea animation.", error);
+  }
+}
+
+function broadcastFistBump(payload) {
+  if (!game.socket) {
+    warn("Socket is unavailable; fist bump animation will remain local.");
+    return;
+  }
+
+  try {
+    game.socket.emit(SOCKET_NAME, payload);
+  } catch (error) {
+    warn("Failed to broadcast fist bump animation.", error);
+  }
+}
+
 function handleSocketMessage(payload) {
   if (payload?.action === "pat") {
     handleSocketPat(payload);
@@ -902,6 +1680,21 @@ function handleSocketMessage(payload) {
 
   if (payload?.action === "hug") {
     handleSocketHug(payload);
+    return;
+  }
+
+  if (payload?.action === "flower") {
+    handleSocketFlower(payload);
+    return;
+  }
+
+  if (payload?.action === "tea") {
+    handleSocketTea(payload);
+    return;
+  }
+
+  if (payload?.action === "fistBump") {
+    handleSocketFistBump(payload);
     return;
   }
 
@@ -939,6 +1732,49 @@ function handleSocketHug(payload) {
   }
 
   playHugAnimation(sourceToken, targetToken, payload.message);
+}
+
+function handleSocketFlower(payload) {
+  if (!canvas?.ready || !canvas.scene) return;
+  if (payload.sceneId !== canvas.scene.id) return;
+  if (payload.userId === game.user?.id) return;
+
+  const token = getCanvasToken(payload.tokenId);
+  if (!token) {
+    debug("Received flower socket payload for a token that is not on this canvas.", payload);
+    return;
+  }
+
+  playFlowerAnimation(token, payload.message, payload.offset);
+}
+
+function handleSocketTea(payload) {
+  if (!canvas?.ready || !canvas.scene) return;
+  if (payload.sceneId !== canvas.scene.id) return;
+  if (payload.userId === game.user?.id) return;
+
+  const token = getCanvasToken(payload.tokenId);
+  if (!token) {
+    debug("Received tea socket payload for a token that is not on this canvas.", payload);
+    return;
+  }
+
+  playTeaAnimation(token, payload.message, payload.offset);
+}
+
+function handleSocketFistBump(payload) {
+  if (!canvas?.ready || !canvas.scene) return;
+  if (payload.sceneId !== canvas.scene.id) return;
+  if (payload.userId === game.user?.id) return;
+
+  const sourceToken = getCanvasToken(payload.sourceTokenId);
+  const targetToken = getCanvasToken(payload.targetTokenId);
+  if (!sourceToken || !targetToken) {
+    debug("Received fist bump socket payload for tokens that are not on this canvas.", payload);
+    return;
+  }
+
+  playFistBumpAnimation(sourceToken, targetToken, payload.message);
 }
 
 async function handleSocketSetPatOffset(payload) {
@@ -1039,6 +1875,49 @@ function createHugPayload(sourceToken, targetToken, message = getDefaultHugMessa
   };
 }
 
+function createFlowerPayload(token, message = getDefaultFlowerMessage()) {
+  return {
+    action: "flower",
+    sceneId: canvas?.scene?.id,
+    tokenId: token?.id ?? token?.document?.id,
+    userId: game.user?.id,
+    userName: game.user?.name,
+    targetName: getTokenName(token),
+    messageKey: "PATPAT.Flower.Chat.Message",
+    message: normalizeFlowerMessage(message),
+    offset: getPatOffset(token)
+  };
+}
+
+function createTeaPayload(token, message = getDefaultTeaMessage()) {
+  return {
+    action: "tea",
+    sceneId: canvas?.scene?.id,
+    tokenId: token?.id ?? token?.document?.id,
+    userId: game.user?.id,
+    userName: game.user?.name,
+    targetName: getTokenName(token),
+    messageKey: "PATPAT.Tea.Chat.Message",
+    message: normalizeTeaMessage(message),
+    offset: getPatOffset(token)
+  };
+}
+
+function createFistBumpPayload(sourceToken, targetToken, message = getDefaultFistBumpMessage()) {
+  return {
+    action: "fistBump",
+    sceneId: canvas?.scene?.id,
+    sourceTokenId: sourceToken?.id ?? sourceToken?.document?.id,
+    targetTokenId: targetToken?.id ?? targetToken?.document?.id,
+    userId: game.user?.id,
+    userName: game.user?.name,
+    sourceName: getTokenName(sourceToken),
+    targetName: getTokenName(targetToken),
+    messageKey: "PATPAT.FistBump.Chat.Message",
+    message: normalizeFistBumpMessage(message)
+  };
+}
+
 function getHtmlElement(html) {
   if (html instanceof HTMLElement) return html;
   if (html?.[0] instanceof HTMLElement) return html[0];
@@ -1079,6 +1958,30 @@ function readHugMessageFromDialog(html) {
   return normalizeHugMessage(formData.get("message"));
 }
 
+function readFlowerMessageFromDialog(html) {
+  const form = getDialogForm(html);
+  if (!form) return getDefaultFlowerMessage();
+
+  const formData = new FormData(form);
+  return normalizeFlowerMessage(formData.get("message"));
+}
+
+function readTeaMessageFromDialog(html) {
+  const form = getDialogForm(html);
+  if (!form) return getDefaultTeaMessage();
+
+  const formData = new FormData(form);
+  return normalizeTeaMessage(formData.get("message"));
+}
+
+function readFistBumpMessageFromDialog(html) {
+  const form = getDialogForm(html);
+  if (!form) return getDefaultFistBumpMessage();
+
+  const formData = new FormData(form);
+  return normalizeFistBumpMessage(formData.get("message"));
+}
+
 function getTokenFromHud(app, data) {
   const hudObject = app?.object;
   if (isCanvasToken(hudObject)) return hudObject;
@@ -1106,8 +2009,36 @@ function getCanvasToken(tokenId) {
   );
 }
 
-function getHugSourceToken(targetToken) {
+function getInteractionTargetToken(sourceToken) {
+  const liveSource = resolveLiveToken(sourceToken) ?? sourceToken;
+  const sourceId = liveSource?.id ?? liveSource?.document?.id;
+  const targetedToken = getSingleTargetedToken(sourceId);
+  return targetedToken ?? liveSource;
+}
+
+function getSingleTargetedToken(excludeTokenId = null) {
+  const targets = Array.from(game.user?.targets ?? [])
+    .map((token) => resolveLiveToken(token) ?? token)
+    .filter((token) => {
+      const tokenId = token?.id ?? token?.document?.id;
+      return tokenId && tokenId !== excludeTokenId;
+    });
+
+  return targets.length === 1 ? targets[0] : null;
+}
+
+function getHugSourceToken(targetToken, preferredSource = null) {
   const targetId = targetToken?.id ?? targetToken?.document?.id;
+  const livePreferredSource = resolveLiveToken(preferredSource) ?? preferredSource;
+  const preferredSourceId = livePreferredSource?.id ?? livePreferredSource?.document?.id;
+  if (
+    preferredSourceId &&
+    preferredSourceId !== targetId &&
+    (game.user?.isGM || userOwnsToken(livePreferredSource))
+  ) {
+    return livePreferredSource;
+  }
+
   const controlled = canvas?.tokens?.controlled ?? [];
   const selectedSource = controlled.find((token) => {
     const tokenId = token?.id ?? token?.document?.id;
@@ -1444,6 +2375,87 @@ function createHugParticleMarkup() {
   }).join("");
 }
 
+function createFlowerParticleMarkup() {
+  const particleCount = randomInt(FLOWER_PARTICLE_CONFIG.count[0], FLOWER_PARTICLE_CONFIG.count[1]);
+
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const driftX = side * randomBetween(FLOWER_PARTICLE_CONFIG.drift * 0.25, FLOWER_PARTICLE_CONFIG.drift);
+    const startX = randomBetween(-28, 28);
+    const rise = randomBetween(FLOWER_PARTICLE_CONFIG.rise[0], FLOWER_PARTICLE_CONFIG.rise[1]);
+    const delay = randomInt(FLOWER_PARTICLE_CONFIG.delay[0], FLOWER_PARTICLE_CONFIG.delay[1]);
+    const size = randomInt(FLOWER_PARTICLE_CONFIG.size[0], FLOWER_PARTICLE_CONFIG.size[1]);
+    const scale = randomBetween(0.82, 1.26);
+    const rotate = randomBetween(-26, 26);
+    const symbol = pick(FLOWER_PARTICLE_CONFIG.symbols);
+    const style = [
+      `--ppp-start-x: ${startX.toFixed(1)}px`,
+      `--ppp-drift-x: ${driftX.toFixed(1)}px`,
+      `--ppp-rise-y: -${rise.toFixed(1)}px`,
+      `--ppp-delay: ${delay}ms`,
+      `--ppp-particle-size: ${size}px`,
+      `--ppp-particle-scale: ${scale.toFixed(2)}`,
+      `--ppp-rotate: ${rotate.toFixed(1)}deg`
+    ].join("; ");
+
+    return `<span class="pat-pat-party-particle" style="${style};">${symbol}</span>`;
+  }).join("");
+}
+
+function createTeaParticleMarkup() {
+  const particleCount = randomInt(TEA_PARTICLE_CONFIG.count[0], TEA_PARTICLE_CONFIG.count[1]);
+
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const driftX = side * randomBetween(TEA_PARTICLE_CONFIG.drift * 0.25, TEA_PARTICLE_CONFIG.drift);
+    const startX = randomBetween(-24, 24);
+    const rise = randomBetween(TEA_PARTICLE_CONFIG.rise[0], TEA_PARTICLE_CONFIG.rise[1]);
+    const delay = randomInt(TEA_PARTICLE_CONFIG.delay[0], TEA_PARTICLE_CONFIG.delay[1]);
+    const size = randomInt(TEA_PARTICLE_CONFIG.size[0], TEA_PARTICLE_CONFIG.size[1]);
+    const scale = randomBetween(0.82, 1.2);
+    const rotate = randomBetween(-18, 18);
+    const symbol = pick(TEA_PARTICLE_CONFIG.symbols);
+    const style = [
+      `--ppp-start-x: ${startX.toFixed(1)}px`,
+      `--ppp-drift-x: ${driftX.toFixed(1)}px`,
+      `--ppp-rise-y: -${rise.toFixed(1)}px`,
+      `--ppp-delay: ${delay}ms`,
+      `--ppp-particle-size: ${size}px`,
+      `--ppp-particle-scale: ${scale.toFixed(2)}`,
+      `--ppp-rotate: ${rotate.toFixed(1)}deg`
+    ].join("; ");
+
+    return `<span class="pat-pat-party-particle" style="${style};">${symbol}</span>`;
+  }).join("");
+}
+
+function createFistBumpParticleMarkup() {
+  const particleCount = randomInt(FIST_BUMP_PARTICLE_CONFIG.count[0], FIST_BUMP_PARTICLE_CONFIG.count[1]);
+
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const driftX = side * randomBetween(FIST_BUMP_PARTICLE_CONFIG.drift * 0.25, FIST_BUMP_PARTICLE_CONFIG.drift);
+    const startX = randomBetween(-18, 18);
+    const rise = randomBetween(FIST_BUMP_PARTICLE_CONFIG.rise[0], FIST_BUMP_PARTICLE_CONFIG.rise[1]);
+    const delay = randomInt(FIST_BUMP_PARTICLE_CONFIG.delay[0], FIST_BUMP_PARTICLE_CONFIG.delay[1]);
+    const size = randomInt(FIST_BUMP_PARTICLE_CONFIG.size[0], FIST_BUMP_PARTICLE_CONFIG.size[1]);
+    const scale = randomBetween(0.86, 1.34);
+    const rotate = randomBetween(-28, 28);
+    const symbol = pick(FIST_BUMP_PARTICLE_CONFIG.symbols);
+    const style = [
+      `--ppp-start-x: ${startX.toFixed(1)}px`,
+      `--ppp-drift-x: ${driftX.toFixed(1)}px`,
+      `--ppp-rise-y: -${rise.toFixed(1)}px`,
+      `--ppp-delay: ${delay}ms`,
+      `--ppp-particle-size: ${size}px`,
+      `--ppp-particle-scale: ${scale.toFixed(2)}`,
+      `--ppp-rotate: ${rotate.toFixed(1)}deg`
+    ].join("; ");
+
+    return `<span class="pat-pat-party-particle" style="${style};">${symbol}</span>`;
+  }).join("");
+}
+
 function createPixiPatEffect(PIXIConstructor, intensity, message) {
   const selectedIntensity = normalizeIntensity(intensity);
   const config = PIXI_EFFECT_CONFIG_BY_INTENSITY[selectedIntensity] ?? PIXI_EFFECT_CONFIG_BY_INTENSITY.normal;
@@ -1728,6 +2740,276 @@ function createPixiHugParticles(PIXIConstructor) {
   });
 }
 
+function createPixiFlowerEffect(PIXIConstructor, message) {
+  const effect = new PIXIConstructor.Container();
+  effect.name = `${MODULE_ID}-pixi-flower-effect`;
+  effect.eventMode = "none";
+  effect.interactiveChildren = false;
+  effect.sortableChildren = true;
+  effect.zIndex = Number(CONFIG?.Canvas?.groups?.interface?.zIndexScrollingText ?? 700) + 21;
+
+  const glow = createPixiTokenGlow(PIXIConstructor);
+  const bouquet = createPixiText(PIXIConstructor, FLOWER_SYMBOL, {
+    fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+    fontSize: 42,
+    dropShadow: true,
+    dropShadowAlpha: 0.24,
+    dropShadowBlur: 4,
+    dropShadowDistance: 2
+  });
+  setPixiAnchor(bouquet, 0.5);
+  bouquet.alpha = 0;
+
+  const particles = createPixiFlowerParticles(PIXIConstructor);
+  const floatingText = createPixiFloatingText(PIXIConstructor, normalizeFlowerMessage(message));
+
+  glow.zIndex = 1;
+  particles.forEach((particle) => particle.text.zIndex = 2);
+  bouquet.zIndex = 3;
+  floatingText.group.zIndex = 4;
+
+  effect.addChild(glow);
+  for (const particle of particles) effect.addChild(particle.text);
+  effect.addChild(bouquet);
+  effect.addChild(floatingText.group);
+
+  effect.patPatParty = {
+    glow,
+    bouquet,
+    particles,
+    floatingText
+  };
+
+  return effect;
+}
+
+function createPixiFlowerParticles(PIXIConstructor) {
+  const particleCount = randomInt(FLOWER_PARTICLE_CONFIG.count[0], FLOWER_PARTICLE_CONFIG.count[1]);
+
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const startX = randomBetween(-30, 30);
+    const startY = randomBetween(-4, 22);
+    const driftX = side * randomBetween(FLOWER_PARTICLE_CONFIG.drift * 0.25, FLOWER_PARTICLE_CONFIG.drift);
+    const rise = randomBetween(FLOWER_PARTICLE_CONFIG.rise[0], FLOWER_PARTICLE_CONFIG.rise[1]);
+    const delay = randomInt(FLOWER_PARTICLE_CONFIG.delay[0], FLOWER_PARTICLE_CONFIG.delay[1]);
+    const size = randomInt(FLOWER_PARTICLE_CONFIG.size[0], FLOWER_PARTICLE_CONFIG.size[1]);
+    const targetScale = randomBetween(0.82, 1.24);
+    const rotation = randomBetween(-0.46, 0.46);
+    const text = createPixiText(PIXIConstructor, pick(FLOWER_PARTICLE_CONFIG.symbols), {
+      fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+      fontSize: size,
+      dropShadow: true,
+      dropShadowAlpha: 0.24,
+      dropShadowBlur: 3,
+      dropShadowDistance: 1
+    });
+    setPixiAnchor(text, 0.5);
+    text.alpha = 0;
+    text.position.set(startX, startY);
+
+    return {
+      text,
+      delay,
+      duration: 980,
+      startX,
+      startY,
+      driftX,
+      rise,
+      targetScale,
+      rotation
+    };
+  });
+}
+
+function createPixiTeaEffect(PIXIConstructor, message) {
+  const effect = new PIXIConstructor.Container();
+  effect.name = `${MODULE_ID}-pixi-tea-effect`;
+  effect.eventMode = "none";
+  effect.interactiveChildren = false;
+  effect.sortableChildren = true;
+  effect.zIndex = Number(CONFIG?.Canvas?.groups?.interface?.zIndexScrollingText ?? 700) + 21;
+
+  const glow = createPixiTokenGlow(PIXIConstructor);
+  const tea = createPixiText(PIXIConstructor, TEA_SYMBOL, {
+    fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+    fontSize: 42,
+    dropShadow: true,
+    dropShadowAlpha: 0.24,
+    dropShadowBlur: 4,
+    dropShadowDistance: 2
+  });
+  setPixiAnchor(tea, 0.5);
+  tea.alpha = 0;
+
+  const particles = createPixiTeaParticles(PIXIConstructor);
+  const floatingText = createPixiFloatingText(PIXIConstructor, normalizeTeaMessage(message));
+
+  glow.zIndex = 1;
+  particles.forEach((particle) => particle.text.zIndex = 2);
+  tea.zIndex = 3;
+  floatingText.group.zIndex = 4;
+
+  effect.addChild(glow);
+  for (const particle of particles) effect.addChild(particle.text);
+  effect.addChild(tea);
+  effect.addChild(floatingText.group);
+
+  effect.patPatParty = {
+    glow,
+    tea,
+    particles,
+    floatingText
+  };
+
+  return effect;
+}
+
+function createPixiTeaParticles(PIXIConstructor) {
+  const particleCount = randomInt(TEA_PARTICLE_CONFIG.count[0], TEA_PARTICLE_CONFIG.count[1]);
+
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const startX = randomBetween(-24, 24);
+    const startY = randomBetween(-4, 18);
+    const driftX = side * randomBetween(TEA_PARTICLE_CONFIG.drift * 0.25, TEA_PARTICLE_CONFIG.drift);
+    const rise = randomBetween(TEA_PARTICLE_CONFIG.rise[0], TEA_PARTICLE_CONFIG.rise[1]);
+    const delay = randomInt(TEA_PARTICLE_CONFIG.delay[0], TEA_PARTICLE_CONFIG.delay[1]);
+    const size = randomInt(TEA_PARTICLE_CONFIG.size[0], TEA_PARTICLE_CONFIG.size[1]);
+    const targetScale = randomBetween(0.82, 1.2);
+    const rotation = randomBetween(-0.32, 0.32);
+    const text = createPixiText(PIXIConstructor, pick(TEA_PARTICLE_CONFIG.symbols), {
+      fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+      fontSize: size,
+      dropShadow: true,
+      dropShadowAlpha: 0.22,
+      dropShadowBlur: 3,
+      dropShadowDistance: 1
+    });
+    setPixiAnchor(text, 0.5);
+    text.alpha = 0;
+    text.position.set(startX, startY);
+
+    return {
+      text,
+      delay,
+      duration: 960,
+      startX,
+      startY,
+      driftX,
+      rise,
+      targetScale,
+      rotation
+    };
+  });
+}
+
+function createPixiFistBumpEffect(PIXIConstructor, message) {
+  const effect = new PIXIConstructor.Container();
+  effect.name = `${MODULE_ID}-pixi-fist-bump-effect`;
+  effect.eventMode = "none";
+  effect.interactiveChildren = false;
+  effect.sortableChildren = true;
+  effect.zIndex = Number(CONFIG?.Canvas?.groups?.interface?.zIndexScrollingText ?? 700) + 24;
+
+  const burst = new PIXIConstructor.Graphics();
+  burst.name = `${MODULE_ID}-fist-bump-burst`;
+  const leftFist = createPixiFist(PIXIConstructor, false);
+  const rightFist = createPixiFist(PIXIConstructor, true);
+  const particles = createPixiFistBumpParticles(PIXIConstructor);
+  const floatingText = createPixiFloatingText(PIXIConstructor, normalizeFistBumpMessage(message));
+
+  burst.zIndex = 1;
+  particles.forEach((particle) => particle.text.zIndex = 2);
+  leftFist.zIndex = 3;
+  rightFist.zIndex = 3;
+  floatingText.group.zIndex = 4;
+
+  effect.addChild(burst);
+  for (const particle of particles) effect.addChild(particle.text);
+  effect.addChild(leftFist);
+  effect.addChild(rightFist);
+  effect.addChild(floatingText.group);
+
+  effect.patPatParty = {
+    burst,
+    leftFist,
+    rightFist,
+    particles,
+    floatingText,
+    endpoints: null
+  };
+
+  return effect;
+}
+
+function createPixiFist(PIXIConstructor, mirrored) {
+  const group = new PIXIConstructor.Container();
+  const glow = new PIXIConstructor.Graphics();
+  glow.beginFill(0xffd565, 0.22);
+  glow.drawCircle(0, 2, 28);
+  glow.endFill();
+  glow.beginFill(0xff8ec3, 0.12);
+  glow.drawCircle(0, 2, 36);
+  glow.endFill();
+
+  const fist = createPixiText(PIXIConstructor, FIST_SYMBOL, {
+    fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+    fontSize: 36,
+    dropShadow: true,
+    dropShadowAlpha: 0.28,
+    dropShadowBlur: 4,
+    dropShadowDistance: 2
+  });
+  setPixiAnchor(fist, 0.5);
+  fist.scale.x = mirrored ? -1 : 1;
+
+  group.addChild(glow);
+  group.addChild(fist);
+  group.alpha = 0;
+  group.patPatParty = { glow, fist };
+  return group;
+}
+
+function createPixiFistBumpParticles(PIXIConstructor) {
+  const particleCount = randomInt(FIST_BUMP_PARTICLE_CONFIG.count[0], FIST_BUMP_PARTICLE_CONFIG.count[1]);
+
+  return Array.from({ length: particleCount }, (_, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const startX = randomBetween(-16, 16);
+    const startY = randomBetween(-10, 18);
+    const driftX = side * randomBetween(FIST_BUMP_PARTICLE_CONFIG.drift * 0.25, FIST_BUMP_PARTICLE_CONFIG.drift);
+    const rise = randomBetween(FIST_BUMP_PARTICLE_CONFIG.rise[0], FIST_BUMP_PARTICLE_CONFIG.rise[1]);
+    const delay = randomInt(FIST_BUMP_PARTICLE_CONFIG.delay[0], FIST_BUMP_PARTICLE_CONFIG.delay[1]);
+    const size = randomInt(FIST_BUMP_PARTICLE_CONFIG.size[0], FIST_BUMP_PARTICLE_CONFIG.size[1]);
+    const targetScale = randomBetween(0.86, 1.34);
+    const rotation = randomBetween(-0.48, 0.48);
+    const text = createPixiText(PIXIConstructor, pick(FIST_BUMP_PARTICLE_CONFIG.symbols), {
+      fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
+      fontSize: size,
+      dropShadow: true,
+      dropShadowAlpha: 0.26,
+      dropShadowBlur: 3,
+      dropShadowDistance: 1
+    });
+    setPixiAnchor(text, 0.5);
+    text.alpha = 0;
+    text.position.set(startX, startY);
+
+    return {
+      text,
+      delay,
+      duration: 840,
+      startX,
+      startY,
+      driftX,
+      rise,
+      targetScale,
+      rotation
+    };
+  });
+}
+
 function updatePixiPatEffect(effect, intensity, config, elapsed, progress, duration) {
   const parts = effect.patPatParty;
   if (!parts) return;
@@ -1837,6 +3119,10 @@ function updatePixiFloatingText(textGroup, config, elapsed, progress, duration) 
 }
 
 function positionHugEffect(effect, endpoints) {
+  positionDuoEffect(effect, endpoints);
+}
+
+function positionDuoEffect(effect, endpoints) {
   const midpoint = getMidpoint(endpoints.source, endpoints.target);
   const scale = getCanvasStageScale();
 
@@ -1889,6 +3175,164 @@ function updatePixiHugEffect(effect, elapsed, progress) {
 
   updatePixiParticles(parts.particles, elapsed);
   updatePixiFloatingText(parts.floatingText.group, { textRise: 58 }, elapsed, progress, HUG_EFFECT_DURATION);
+}
+
+function updatePixiFlowerEffect(effect, elapsed, progress) {
+  const parts = effect.patPatParty;
+  if (!parts) return;
+
+  updatePixiTokenGlow(parts.glow, "gentle", progress);
+  updatePixiFlowerBouquet(parts.bouquet, progress);
+  updatePixiParticles(parts.particles, elapsed);
+  updatePixiFloatingText(parts.floatingText.group, { textRise: 52 }, elapsed, progress, FLOWER_EFFECT_DURATION);
+}
+
+function updatePixiTeaEffect(effect, elapsed, progress) {
+  const parts = effect.patPatParty;
+  if (!parts) return;
+
+  updatePixiTokenGlow(parts.glow, "gentle", progress);
+  updatePixiTeaCup(parts.tea, progress);
+  updatePixiParticles(parts.particles, elapsed);
+  updatePixiFloatingText(parts.floatingText.group, { textRise: 48 }, elapsed, progress, TEA_EFFECT_DURATION);
+}
+
+function updatePixiFlowerBouquet(bouquet, progress) {
+  const enterEnd = 0.28;
+  const exitStart = 0.78;
+  const sway = Math.sin(progress * Math.PI * 4);
+  const envelope = Math.sin(progress * Math.PI);
+
+  if (progress < enterEnd) {
+    const t = easeOutBack(progress / enterEnd);
+    bouquet.alpha = clamp01(t);
+    bouquet.x = lerp(34, 0, t);
+    bouquet.y = lerp(-64, -10, easeOutCubic(progress / enterEnd));
+    bouquet.rotation = lerp(0.32, -0.06, t);
+    bouquet.scale.set(lerp(0.72, 1.06, t));
+  } else if (progress < exitStart) {
+    bouquet.alpha = 1;
+    bouquet.x = sway * 5;
+    bouquet.y = -10 - envelope * 6;
+    bouquet.rotation = -0.04 + sway * 0.08;
+    bouquet.scale.set(1.02 + envelope * 0.05);
+  } else {
+    const t = easeInOutCubic((progress - exitStart) / (1 - exitStart));
+    bouquet.alpha = 1 - t;
+    bouquet.x = lerp(0, -8, t);
+    bouquet.y = lerp(-10, -52, t);
+    bouquet.rotation = lerp(0, -0.16, t);
+    bouquet.scale.set(lerp(1, 0.76, t));
+  }
+}
+
+function updatePixiTeaCup(tea, progress) {
+  const enterEnd = 0.26;
+  const exitStart = 0.78;
+  const sway = Math.sin(progress * Math.PI * 3.5);
+  const envelope = Math.sin(progress * Math.PI);
+
+  if (progress < enterEnd) {
+    const t = easeOutBack(progress / enterEnd);
+    tea.alpha = clamp01(t);
+    tea.x = lerp(30, 0, t);
+    tea.y = lerp(-54, -8, easeOutCubic(progress / enterEnd));
+    tea.rotation = lerp(0.22, -0.04, t);
+    tea.scale.set(lerp(0.72, 1.04, t));
+  } else if (progress < exitStart) {
+    tea.alpha = 1;
+    tea.x = sway * 3;
+    tea.y = -8 - envelope * 5;
+    tea.rotation = -0.02 + sway * 0.05;
+    tea.scale.set(1.02 + envelope * 0.035);
+  } else {
+    const t = easeInOutCubic((progress - exitStart) / (1 - exitStart));
+    tea.alpha = 1 - t;
+    tea.x = lerp(0, -4, t);
+    tea.y = lerp(-8, -46, t);
+    tea.rotation = lerp(0, -0.1, t);
+    tea.scale.set(lerp(1, 0.76, t));
+  }
+}
+
+function updatePixiFistBumpEffect(effect, elapsed, progress) {
+  const parts = effect.patPatParty;
+  if (!parts?.endpoints) return;
+
+  const { source, target } = parts.endpoints;
+  const sourceStart = {
+    x: lerp(source.x, 0, 0.36),
+    y: lerp(source.y, target.y, 0.5) - 24
+  };
+  const targetStart = {
+    x: lerp(target.x, 0, 0.36),
+    y: lerp(target.y, source.y, 0.5) - 24
+  };
+  const collideAt = { x: 0, y: Math.min(sourceStart.y, targetStart.y) - 6 };
+  const impact = Math.max(0, 1 - Math.abs(progress - 0.42) / 0.12);
+  const rebound = Math.max(0, (progress - 0.48) / 0.52);
+
+  updatePixiFist(parts.leftFist, sourceStart, collideAt, progress, impact, rebound, -1);
+  updatePixiFist(parts.rightFist, targetStart, collideAt, progress, impact, rebound, 1);
+  drawPixiFistBumpBurst(parts.burst, impact, progress);
+  updatePixiParticles(parts.particles, elapsed);
+  updatePixiFloatingText(parts.floatingText.group, { textRise: 54 }, elapsed, progress, FIST_BUMP_EFFECT_DURATION);
+}
+
+function updatePixiFist(fist, start, collideAt, progress, impact, rebound, direction) {
+  const approachEnd = 0.42;
+  const exitStart = 0.48;
+
+  if (progress < approachEnd) {
+    const t = easeInOutCubic(progress / approachEnd);
+    fist.alpha = clamp01(t * 1.4);
+    fist.x = lerp(start.x, collideAt.x - direction * 12, t);
+    fist.y = lerp(start.y, collideAt.y, t);
+    fist.rotation = lerp(direction * 0.34, direction * 0.04, t);
+    fist.scale.set(lerp(0.78, 1.08, easeOutBack(t)));
+  } else if (progress < exitStart) {
+    const shake = Math.sin(progress * Math.PI * 52) * impact;
+    fist.alpha = 1;
+    fist.x = collideAt.x - direction * (10 + shake * 2);
+    fist.y = collideAt.y + Math.abs(shake) * 2;
+    fist.rotation = direction * (0.04 + shake * 0.06);
+    fist.scale.set(1.12 + impact * 0.12);
+  } else {
+    const t = easeOutCubic(rebound);
+    fist.alpha = 1 - easeInCubic(Math.max(0, (progress - 0.78) / 0.22));
+    fist.x = lerp(collideAt.x - direction * 12, start.x * 0.72, t);
+    fist.y = lerp(collideAt.y, start.y - 24, t);
+    fist.rotation = lerp(direction * -0.08, direction * -0.28, t);
+    fist.scale.set(lerp(1.04, 0.74, t));
+  }
+
+  const glow = fist.patPatParty?.glow;
+  if (glow) {
+    glow.alpha = fist.alpha * (0.34 + impact * 0.32);
+    glow.scale.set(0.9 + impact * 0.28);
+  }
+}
+
+function drawPixiFistBumpBurst(burst, impact, progress) {
+  burst.clear();
+  if (impact <= 0.01 && progress > 0.7) return;
+
+  const alpha = Math.max(0, impact);
+  const radius = 20 + impact * 42;
+  burst.lineStyle({ width: 5, color: 0xffffff, alpha: alpha * 0.62, cap: globalThis.PIXI?.LINE_CAP?.ROUND });
+  burst.drawCircle(0, -30, radius * 0.42);
+  burst.lineStyle({ width: 3, color: 0xffd565, alpha: alpha * 0.88, cap: globalThis.PIXI?.LINE_CAP?.ROUND });
+  burst.drawCircle(0, -30, radius * 0.56);
+
+  const rayCount = 8;
+  for (let index = 0; index < rayCount; index += 1) {
+    const angle = (Math.PI * 2 * index) / rayCount;
+    const inner = 16 + impact * 10;
+    const outer = 30 + impact * 38;
+    burst.lineStyle({ width: 2.4, color: index % 2 === 0 ? 0xff9cca : 0x8ff5df, alpha: alpha * 0.84, cap: globalThis.PIXI?.LINE_CAP?.ROUND });
+    burst.moveTo(Math.cos(angle) * inner, -30 + Math.sin(angle) * inner);
+    burst.lineTo(Math.cos(angle) * outer, -30 + Math.sin(angle) * outer);
+  }
 }
 
 function drawPixiHugGlow(glow, source, target, envelope) {
@@ -2035,6 +3479,18 @@ function getDefaultHugMessage() {
   return truncateText(localize("PATPAT.Hug.Chat.Message"), MAX_MESSAGE_LENGTH);
 }
 
+function getDefaultFlowerMessage() {
+  return truncateText(localize("PATPAT.Flower.Chat.Message"), MAX_MESSAGE_LENGTH);
+}
+
+function getDefaultTeaMessage() {
+  return truncateText(localize("PATPAT.Tea.Chat.Message"), MAX_MESSAGE_LENGTH);
+}
+
+function getDefaultFistBumpMessage() {
+  return truncateText(localize("PATPAT.FistBump.Chat.Message"), MAX_MESSAGE_LENGTH);
+}
+
 function normalizePatMessage(value) {
   const normalized = String(value ?? "")
     .replace(/\s+/g, " ")
@@ -2050,6 +3506,33 @@ function normalizeHugMessage(value) {
     .trim();
 
   if (!normalized) return getDefaultHugMessage();
+  return truncateText(normalized, MAX_MESSAGE_LENGTH);
+}
+
+function normalizeFlowerMessage(value) {
+  const normalized = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return getDefaultFlowerMessage();
+  return truncateText(normalized, MAX_MESSAGE_LENGTH);
+}
+
+function normalizeTeaMessage(value) {
+  const normalized = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return getDefaultTeaMessage();
+  return truncateText(normalized, MAX_MESSAGE_LENGTH);
+}
+
+function normalizeFistBumpMessage(value) {
+  const normalized = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return getDefaultFistBumpMessage();
   return truncateText(normalized, MAX_MESSAGE_LENGTH);
 }
 

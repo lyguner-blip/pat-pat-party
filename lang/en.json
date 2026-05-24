@@ -1,8 +1,12 @@
 {
   "PATPAT": {
     "Controls": {
+      "Interact": "Interact",
       "Pat": "Pat Pat",
       "Hug": "Hug",
+      "FistBump": "Fist Bump",
+      "Flower": "Send Flowers",
+      "Tea": "Serve Tea",
       "Calibrate": "Calibrate Pat Position"
     },
     "Intensity": {
@@ -43,6 +47,13 @@
         "Cancel": "Cancel",
         "Reset": "Reset"
       },
+      "Interaction": {
+        "Title": "Choose Interaction",
+        "Source": "Current Token",
+        "Target": "Interaction Target",
+        "TargetedHint": "A single targeted teammate token was detected, so this interaction will use it first.",
+        "SelfHint": "No single other targeted token was detected, so this interaction will use the current token."
+      },
       "Pat": {
         "Title": "Choose Pat Intensity",
         "Target": "Target",
@@ -58,6 +69,31 @@
         "MessagePlaceholder": "Hug energy restored ♡",
         "MessageHint": "Shown between the two tokens and in chat. Up to {max} characters; leave blank to use the default.",
         "Action": "Hug"
+      },
+      "FistBump": {
+        "Title": "Fist Bump a Teammate",
+        "Source": "Source Token",
+        "Target": "Target Token",
+        "MessageLabel": "Message",
+        "MessagePlaceholder": "Tag in. We have this!",
+        "MessageHint": "Shown between the two tokens and in chat. Up to {max} characters; leave blank to use the default.",
+        "Action": "Fist Bump"
+      },
+      "Flower": {
+        "Title": "Send Flowers",
+        "Target": "Target",
+        "MessageLabel": "Message",
+        "MessagePlaceholder": "A tiny bouquet for you ♡",
+        "MessageHint": "Shown above the token and in chat. Up to {max} characters; leave blank to use the default.",
+        "Action": "Send Flowers"
+      },
+      "Tea": {
+        "Title": "Serve Tea",
+        "Target": "Target",
+        "MessageLabel": "Message",
+        "MessagePlaceholder": "Have some tea and breathe ♡",
+        "MessageHint": "Shown above the token and in chat. Up to {max} characters; leave blank to use the default.",
+        "Action": "Serve Tea"
       },
       "Calibration": {
         "Title": "Calibrate Pat Position",
@@ -93,6 +129,28 @@
         "Flavor": "A warm token interaction",
         "Message": "Hug energy restored ♡",
         "Line": "{actor} gives {target} a hug."
+      }
+    },
+    "FistBump": {
+      "Chat": {
+        "Title": "Fist Bump Party",
+        "Flavor": "An energetic token interaction",
+        "Message": "Tag in. We have this!",
+        "Line": "{actor} fist bumps {target}."
+      }
+    },
+    "Flower": {
+      "Chat": {
+        "Title": "Flower Party",
+        "Flavor": "A gentle token interaction",
+        "Message": "A tiny bouquet for you ♡"
+      }
+    },
+    "Tea": {
+      "Chat": {
+        "Title": "Tea Party",
+        "Flavor": "A cozy token interaction",
+        "Message": "Have some tea and breathe ♡"
       }
     }
   }
